@@ -17,3 +17,6 @@ release.properties
 
 # Docker
 *.jar
+
+# Amazon Q
+.amazonq/
