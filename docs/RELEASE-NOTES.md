@@ -1,6 +1,84 @@
 # Release Notes
 
-## v1.2 - Circuit Breaker Pattern (Current)
+## v1.3 - Saga Pattern Improvements (Current)
+
+**Release Date:** 2025-10-17
+
+### New Features
+- **Saga Timeout Handling**: Automatic compensation for timed-out sagas
+  - Default timeout: 30 seconds from saga creation
+  - Scheduled check every 5 seconds for expired sagas
+  - Automatic compensation triggered for timed-out transactions
+  - Configurable timeout duration via SagaState constructor
+
+- **Saga Recovery on Service Restart**: Automatic recovery of in-progress sagas
+  - @PostConstruct method runs on service startup
+  - Queries all sagas with status PROCESSING or STARTED
+  - Automatically triggers compensation for incomplete sagas
+  - Ensures no lost transactions after service restart
+
+- **Saga Monitoring Dashboard**: Real-time Grafana visualization
+  - Prometheus metrics: saga_total, saga_completed, saga_failed, saga_processing, saga_success_rate
+  - Metrics updated every 10 seconds via scheduled task
+  - 6 dashboard panels: Total, Completed, Failed, Success Rate, Time Series, Pie Chart
+  - Dashboard auto-refresh every 10 seconds
+
+- **Database Persistence for Orders**: Orders now persisted to PostgreSQL
+  - Order entity with JPA annotations
+  - OrderRepository for data access
+  - Database-generated IDs instead of API Gateway IDs
+  - Foreign key relationship maintained between payments and orders
+
+### Implementation
+- **SagaOrchestrator**: Enhanced with timeout checking and recovery methods
+  - `checkTimeouts()`: @Scheduled method runs every 5 seconds
+  - `recoverSagas()`: @PostConstruct method for startup recovery
+  - Compensation logic for failed/timed-out sagas
+
+- **SagaMetricsService**: Exposes Prometheus metrics for monitoring
+  - Uses AtomicInteger for gauge values to prevent NaN
+  - Scheduled update every 10 seconds
+  - Metrics: total, completed, failed, processing, success_rate
+
+- **Database Schema Updates**:
+  - Added `timeout_at` field to saga_state table
+  - Added Order entity with fields: id, customer_id, product_id, quantity, amount, status, created_at, updated_at
+  - Restored foreign key constraint: payments.order_id → orders.id
+
+- **Kafka Topics**: Added compensation-events topic (3 partitions)
+
+### Configuration
+- **@EnableScheduling**: Added to OrderServiceApplication for scheduled tasks
+- **Micrometer**: Integrated for Prometheus metrics exposure
+- **Grafana Dashboard**: saga-dashboard.json with 6 monitoring panels
+
+### Testing Results
+- Positive case: 3 orders completed successfully (60%)
+- Negative case: 2 orders failed with compensation (40%)
+- Recovery case: In-progress saga compensated on service restart
+- Timeout case: Expired sagas automatically compensated
+- Dashboard: All metrics displaying correctly with 60% success rate
+
+### Technical Changes
+- Added entities: Order, SagaState (with timeout_at field)
+- Added repositories: OrderRepository, SagaStateRepository
+- Added services: SagaOrchestrator, SagaMetricsService
+- Updated OrderService to persist orders to database
+- Updated PaymentService with cancelPayment method
+- Updated PaymentController with cancel endpoint
+- Added Grafana dashboard: monitoring/grafana/dashboards/saga-dashboard.json
+- Updated README with saga improvements documentation
+- Removed temporary files: order-payload.json
+
+### Documentation
+- New file: docs/SAGA-PATTERN.md with comprehensive saga documentation
+- Updated README with saga improvements section
+- Updated database schema documentation with timeout_at field
+- Updated Grafana dashboards section
+
+---
+
+## v1.2 - Circuit Breaker Pattern
 
 **Release Date:** 2025-10-16
 
