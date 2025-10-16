@@ -120,16 +120,46 @@ docker-compose down -v
 
 ## Event Flow
 
-1. **API Gateway** receives HTTP request
-2. **API Gateway** publishes `OrderCreated` event to Kafka
-3. **Order Service** consumes the event
-4. **Order Service** calls **Payment Service** via HTTP (with retry)
-5. **Payment Service** checks for existing payment (idempotency)
-6. **Payment Service** stores data in PostgreSQL
-7. **Payment Service** publishes `PaymentProcessed` event (with retry)
-8. Failed messages are sent to **dead-letter-queue** for manual review
-9. All services emit logs, metrics, and traces to Grafana Agent
-10. Grafana Agent forwards data to Loki (logs), Mimir (metrics), and Tempo (traces)
+### Happy Path (Successful Order)
+1. **API Gateway** receives HTTP POST request to create order
+2. **API Gateway** publishes `OrderCreated` event to **order-events** Kafka topic
+3. **Order Service** consumes the event and starts saga orchestration
+4. **Order Service** persists order to PostgreSQL with status PENDING
+5. **Order Service** creates saga state (STARTED → PROCESSING)
+6. **Order Service** calls **Payment Service** via HTTP with circuit breaker
+7. **Payment Service** checks for existing payment (idempotency)
+8. **Payment Service** persists payment to PostgreSQL
+9. **Payment Service** publishes `PaymentProcessed` event to **payment-events** topic
+10. **Order Service** updates saga state to COMPLETED
+11. **Order Service** updates order status to COMPLETED
+
+### Compensation Flow (Failed Payment)
+1. **Payment Service** is unavailable or returns error
+2. **Circuit Breaker** opens after failure threshold
+3. **Order Service** saga orchestrator detects failure
+4. **Order Service** updates saga state to COMPENSATING
+5. **Order Service** cancels payment (if created) via Payment Service
+6. **Payment Service** publishes `PaymentCancelled` event to **compensation-events** topic
+7. **Order Service** publishes `OrderCancelled` event to **compensation-events** topic
+8. **Order Service** updates saga state to FAILED with step COMPENSATED
+9. **Order Service** updates order status to FAILED
+
+### Saga Timeout Handling
+1. **Scheduled task** checks for expired sagas every 5 seconds
+2. Sagas exceeding 30-second timeout are detected
+3. **Compensation flow** triggered automatically for timed-out sagas
+
+### Saga Recovery on Restart
+1. **Order Service** starts up and runs @PostConstruct recovery method
+2. Queries all sagas with status PROCESSING or STARTED
+3. **Compensation flow** triggered for in-progress sagas
+4. Ensures no lost transactions after service restart
+
+### Observability
+- All services emit logs, metrics, and traces to **Grafana Agent**
+- Grafana Agent forwards data to **Loki** (logs), **Mimir** (metrics), and **Tempo** (traces)
+- Saga metrics exposed via Prometheus: total, completed, failed, success_rate
+- Failed messages sent to **dead-letter-queue** for manual review
 
 ## Monitoring
 
