@@ -3,6 +3,9 @@ package com.example.gateway.controller;
 import com.example.gateway.dto.OrderRequest;
 import com.example.gateway.dto.OrderResponse;
 import com.example.gateway.service.OrderEventService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +19,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @RestController
 @RequestMapping("/api/orders")
+@Tag(name = "Orders", description = "Order management endpoints")
+@SecurityRequirement(name = "Bearer Authentication")
 public class OrderController {
 
     private static final Logger logger = LoggerFactory.getLogger(OrderController.class);
@@ -30,6 +35,7 @@ public class OrderController {
     private final WebClient webClient = WebClient.builder().build();
 
     @PostMapping
+    @Operation(summary = "Create order", description = "Create a new order and publish event to Kafka")
     public ResponseEntity<OrderResponse> createOrder(@RequestBody OrderRequest request) {
         logger.info("Creating order for customer: {}", request.getCustomerId());
         
@@ -52,6 +58,7 @@ public class OrderController {
     }
 
     @GetMapping("/{orderId}")
+    @Operation(summary = "Get order", description = "Retrieve order details by ID")
     public Mono<ResponseEntity<OrderResponse>> getOrder(@PathVariable Long orderId) {
         logger.info("Getting order: {}", orderId);
         
