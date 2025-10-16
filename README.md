@@ -7,30 +7,43 @@ This POC demonstrates a complete Event-Driven Architecture using Spring Boot mic
 ## Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   API Gateway   │───▶│  Order Service  │───▶│ Payment Service │
-│   (Port 8080)   │    │   (Port 8081)   │    │   (Port 8082)   │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 ▼
-                    ┌─────────────────────────┐
-                    │    Kafka Cluster        │
-                    │  (order-events topic)   │
-                    └─────────────────────────┘
-                                 │
-                                 ▼
-                    ┌─────────────────────────┐
-                    │     PostgreSQL          │
-                    │    (Port 5432)          │
-                    └─────────────────────────┘
+                    ┌─────────────────┐
+                    │     Client      │
+                    └────────┬────────┘
+                             │ (All traffic)
+                             ▼
+                    ┌─────────────────┐
+                    │   API Gateway   │◄─── Single Entry Point
+                    │   (Port 8080)   │     (JWT Authentication)
+                    │   + Redis       │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+     ┌────────────┐  ┌────────────┐  ┌────────────┐
+     │   Order    │  │  Payment   │  │   Kafka    │
+     │  Service   │─▶│  Service   │  │  Cluster   │
+     │ (Internal) │  │ (Internal) │  │ (3 topics) │
+     └────────────┘  └──────┬─────┘  └────────────┘
+                            │
+                            ▼
+                    ┌────────────┐
+                    │ PostgreSQL │
+                    └────────────┘
 ```
+
+**Key Points:**
+- All external traffic goes through API Gateway (port 8080)
+- Order and Payment services are internal only (no external ports)
+- JWT authentication validated at API Gateway
+- Redis stores JWT tokens with TTL auto-expiration
 
 ## Services
 
-1. **API Gateway** (Port 8080) - Entry point, routes requests and publishes events
-2. **Order Service** (Port 8081) - Business logic, consumes events, calls Payment Service
-3. **Payment Service** (Port 8082) - Database operations, connects to PostgreSQL
+1. **API Gateway** (Port 8080) - Single entry point with JWT authentication, proxies all requests to internal services
+2. **Order Service** (Internal) - Business logic, consumes Kafka events, calls Payment Service
+3. **Payment Service** (Internal) - Database operations, connects to PostgreSQL
+4. **Redis** (Port 6379) - JWT token storage with TTL auto-expiration
 
 ## Monitoring Stack (LGTM)
 
@@ -66,19 +79,30 @@ This POC demonstrates a complete Event-Driven Architecture using Spring Boot mic
 
 4. **Test the API:**
    ```bash
-   # Create an order
+   # Login to get JWT token
+   curl -X POST http://localhost:8080/api/auth/login \
+     -H "Content-Type: application/json" \
+     -d '{"username": "admin", "password": "admin"}'
+   
+   # Create an order (use token from login response)
    curl -X POST http://localhost:8080/api/orders \
      -H "Content-Type: application/json" \
+     -H "Authorization: Bearer <your-token>" \
      -d '{"customerId": "123", "productId": "456", "quantity": 2, "amount": 100.00}'
    
    # Get order status
-   curl http://localhost:8080/api/orders/1
+   curl http://localhost:8080/api/orders/1 \
+     -H "Authorization: Bearer <your-token>"
    ```
 
-5. **Access Monitoring:**
-   - Grafana: http://localhost:3000 (admin/admin)
-   - Kafka UI: http://localhost:8090
-   - PostgreSQL: localhost:5432 (user: postgres, password: postgres)
+5. **Access Services:**
+   - **Swagger UI**: http://localhost:8080/swagger-ui/index.html (API Gateway only)
+   - **Grafana**: http://localhost:3000 (admin/admin)
+   - **Kafka UI**: http://localhost:8090
+   - **Redis**: localhost:6379
+   - **PostgreSQL**: localhost:5432 (user: postgres, password: postgres)
+
+   **Note**: Order and Payment services are internal only and not directly accessible from outside.
 
 ### Stop the Demo
 
@@ -160,30 +184,42 @@ LOKI_URL=http://loki:3100
 TEMPO_URL=http://grafana-agent:9411
 ```
 
+## Authentication
+
+All API endpoints (except `/api/auth/login`) require JWT authentication.
+
+**Default Credentials:**
+- Username: `admin`
+- Password: `admin`
+
+**Authentication Flow:**
+1. Login via `POST /api/auth/login` to get JWT token
+2. Include token in subsequent requests: `Authorization: Bearer <token>`
+3. Token expires after 24 hours
+
 ## API Documentation
+
+Interactive API documentation available via Swagger UI at API Gateway:
+- **Swagger UI**: http://localhost:8080/swagger-ui/index.html
+
+All API requests must go through API Gateway. Direct access to Order and Payment services is not allowed.
 
 ### API Gateway Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/orders` | Create new order |
-| GET | `/api/orders/{id}` | Get order by ID |
-| GET | `/actuator/health` | Health check |
+| Method | Endpoint | Auth Required | Description |
+|--------|----------|---------------|-------------|
+| POST | `/api/auth/login` | No | Login and get JWT token |
+| POST | `/api/orders` | Yes | Create new order |
+| GET | `/api/orders/{id}` | Yes | Get order by ID |
+| GET | `/actuator/health` | No | Health check |
 
-### Order Service Endpoints
+### Payment Endpoints (via API Gateway)
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/orders/{id}` | Get order details |
-| GET | `/actuator/health` | Health check |
+| Method | Endpoint | Auth Required | Description |
+|--------|----------|---------------|-------------|
+| GET | `/api/payments/{id}` | Yes | Get payment details |
 
-### Payment Service Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/payments` | Process payment |
-| GET | `/payments/{id}` | Get payment details |
-| GET | `/actuator/health` | Health check |
+**Note**: All endpoints are accessed through API Gateway. Order and Payment services are internal only.
 
 ## Kafka Topics
 
@@ -275,24 +311,31 @@ ab -n 1000 -c 10 -H "Content-Type: application/json" \
 
 ## Production-Ready Features
 
-This POC implements several production-ready patterns:
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **JWT Authentication** | ✅ | Secure API endpoints with token-based authentication |
+| **API Documentation** | ✅ | Interactive Swagger UI for all services |
+| **Idempotency** | ✅ | Prevents duplicate payments via database constraints |
+| **Retry Mechanism** | ✅ | HTTP calls and event publishing with exponential backoff |
+| **Dead Letter Queue** | ✅ | Failed messages captured with full error metadata |
+| **Error Handling** | ✅ | Comprehensive exception handling with structured logging |
+| **Sequential Startup** | ✅ | Services start in correct order with health checks |
+| **Auto-create Topics** | ✅ | Kafka topics created automatically on startup |
+| **Database Indexes** | ✅ | Optimized queries with proper indexes |
+| **Distributed Tracing** | ✅ | End-to-end request tracking across all services |
+| **Structured Logging** | ✅ | Parameterized logs with trace IDs for correlation |
+| **Health Checks** | ✅ | Actuator endpoints with Docker healthcheck integration |
 
-✅ **Idempotency** - Prevents duplicate payments via database unique constraint and application-level checks
-✅ **Retry Mechanism** - HTTP calls and event publishing retry with exponential backoff (3 attempts)
-✅ **Dead Letter Queue** - Failed messages captured with full error metadata for debugging
-✅ **Error Handling** - Comprehensive exception handling with structured logging
-✅ **Sequential Startup** - Services start in correct order with health check dependencies
-✅ **Auto-create Topics** - Kafka topics created automatically on startup
-✅ **Database Indexes** - Optimized queries with proper indexes
-✅ **Distributed Tracing** - End-to-end request tracking across all services
-✅ **Structured Logging** - Parameterized logs with trace IDs for correlation
-✅ **Health Checks** - Actuator endpoints with Docker healthcheck integration
+For more details, see [docs/PRODUCTION-READY.md](docs/PRODUCTION-READY.md)
 
-For more details, see [PRODUCTION-READY.md](PRODUCTION-READY.md)
+## Documentation
+
+- [Production-Ready Features](docs/PRODUCTION-READY.md)
+- [Release Notes](docs/RELEASE-NOTES.md)
 
 ## Next Steps
 
-1. Add authentication/authorization
+1. Add authentication/authorization ✅ (Completed in v1.1)
 2. Implement circuit breakers (Resilience4j)
 3. Add saga patterns for distributed transactions
 4. Implement API rate limiting

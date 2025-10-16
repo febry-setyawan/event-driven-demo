@@ -137,10 +137,10 @@ public Mono<String> callPaymentService(PaymentRequest request) {
 - Protect backend services
 - Fair resource allocation
 
-### 5. Authentication & Authorization
-- JWT tokens
-- OAuth2/OIDC
-- Role-based access control
+### 5. Enhanced Authorization
+- Role-based access control (RBAC)
+- OAuth2/OIDC integration
+- Fine-grained permissions
 
 ### 6. Data Encryption
 - TLS for all communications
@@ -287,10 +287,15 @@ public Mono<String> callPaymentService(PaymentRequest request) {
 ## Summary
 
 This POC implements **foundational production-ready patterns**:
-✅ Idempotency
-✅ Retry mechanism
-✅ Error handling
-✅ Observability (LGTM stack)
-✅ Database optimizations
+✅ **JWT Authentication** - Token-based authentication with Redis storage
+✅ **Single Entry Point** - API Gateway as the only external access point
+✅ **Idempotency** - Prevents duplicate payments
+✅ **Retry Mechanism** - HTTP calls and event publishing with exponential backoff
+✅ **Dead Letter Queue** - Failed message handling
+✅ **Error Handling** - Comprehensive exception handling
+✅ **Observability** - LGTM stack (Loki, Grafana, Tempo, Mimir)
+✅ **Database Optimizations** - Indexes and unique constraints
+✅ **Sequential Startup** - Health check-based dependencies
+✅ **Auto-create Topics** - Kafka topics created automatically
 
 For full production readiness, implement the additional patterns listed above based on your specific requirements and SLAs.
