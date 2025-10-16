@@ -11,6 +11,10 @@ spring:
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
       acks: all
       retries: 3
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
 
 management:
   zipkin:
@@ -29,7 +33,21 @@ management:
 
 order:
   service:
-    url: ${ORDER_SERVICE_URL:http://localhost:8081}
+    url: ${ORDER_SERVICE_URL:http://order-service:8081}
+
+payment:
+  service:
+    url: ${PAYMENT_SERVICE_URL:http://payment-service:8082}
+
+jwt:
+  secret: ${JWT_SECRET:mySecretKeyForJWTTokenGenerationMustBeLongEnough}
+  expiration: 86400000
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
 
 logging:
   level:
