@@ -23,13 +23,18 @@ This POC demonstrates a complete Event-Driven Architecture using Spring Boot mic
      ┌────────────┐  ┌────────────┐  ┌────────────┐
      │   Order    │  │  Payment   │  │   Kafka    │
      │  Service   │─▶│  Service   │  │  Cluster   │
-     │ (Internal) │  │ (Internal) │  │ (3 topics) │
-     └────────────┘  └──────┬─────┘  └────────────┘
-                            │
-                            ▼
-                    ┌────────────┐
-                    │ PostgreSQL │
-                    └────────────┘
+     │ (Internal) │  │ (Internal) │  │ (4 topics) │
+     │ + Saga     │  │            │  └────────────┘
+     └──────┬─────┘  └──────┬─────┘
+            │               │
+            └────────┬──────┘
+                     ▼
+            ┌─────────────────┐
+            │   PostgreSQL    │
+            │  - orders       │
+            │  - payments     │
+            │  - saga_state   │
+            └─────────────────┘
 ```
 
 **Key Points:**
@@ -37,12 +42,15 @@ This POC demonstrates a complete Event-Driven Architecture using Spring Boot mic
 - Order and Payment services are internal only (no external ports)
 - JWT authentication validated at API Gateway
 - Redis stores JWT tokens with TTL auto-expiration
+- Order Service implements Saga orchestrator for distributed transactions
+- Both Order and Payment services persist data to PostgreSQL
+- Saga state tracked in database for compensation and recovery
 
 ## Services
 
 1. **API Gateway** (Port 8080) - Single entry point with JWT authentication, proxies all requests to internal services
-2. **Order Service** (Internal) - Business logic, consumes Kafka events, calls Payment Service
-3. **Payment Service** (Internal) - Database operations, connects to PostgreSQL
+2. **Order Service** (Internal) - Saga orchestrator, business logic, consumes Kafka events, persists orders and saga state to PostgreSQL
+3. **Payment Service** (Internal) - Payment processing, persists payments to PostgreSQL
 4. **Redis** (Port 6379) - JWT token storage with TTL auto-expiration
 
 ## Monitoring Stack (LGTM)
@@ -131,6 +139,7 @@ Access Grafana at http://localhost:3000 with credentials `admin/admin`.
 
 Pre-configured dashboards:
 - **Event-Driven Architecture Metrics** - HTTP request rate, response time, JVM memory, Kafka messages
+- **Saga Pattern Monitoring** - Total sagas, completed/failed counts, success rate, time series, distribution
 
 ### Logs
 
@@ -227,6 +236,7 @@ Topics are automatically created on startup by the `kafka-init` container:
 
 - **order-events** (3 partitions) - Order lifecycle events
 - **payment-events** (3 partitions) - Payment processing events
+- **compensation-events** (3 partitions) - Saga compensation events
 - **dead-letter-queue** (1 partition) - Failed messages for manual review
 
 ## Database Schema
@@ -250,6 +260,18 @@ CREATE TABLE payments (
     amount DECIMAL(10,2) NOT NULL,
     status VARCHAR(50) NOT NULL,
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Saga state table
+CREATE TABLE saga_state (
+    id BIGSERIAL PRIMARY KEY,
+    order_id BIGINT NOT NULL UNIQUE,
+    status VARCHAR(50) NOT NULL,
+    current_step VARCHAR(50),
+    payment_id BIGINT,
+    timeout_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
@@ -326,12 +348,17 @@ ab -n 1000 -c 10 -H "Content-Type: application/json" \
 | **Distributed Tracing** | ✅ | End-to-end request tracking across all services |
 | **Structured Logging** | ✅ | Parameterized logs with trace IDs for correlation |
 | **Health Checks** | ✅ | Actuator endpoints with Docker healthcheck integration |
+| **Saga Pattern** | ✅ | Orchestration-based saga for distributed transactions |
+| **Saga Timeout Handling** | ✅ | Automatic compensation for timed-out sagas (30s default) |
+| **Saga Recovery** | ✅ | Automatic recovery of in-progress sagas on service restart |
+| **Saga Monitoring** | ✅ | Real-time Grafana dashboard with metrics and visualization |
 
 For more details, see [docs/PRODUCTION-READY.md](docs/PRODUCTION-READY.md)
 
 ## Documentation
 
 - [Production-Ready Features](docs/PRODUCTION-READY.md)
+- [Saga Pattern Implementation](docs/SAGA-PATTERN.md)
 - [Release Notes](docs/RELEASE-NOTES.md)
 
 ## Monitoring Circuit Breakers
@@ -405,7 +432,7 @@ curl http://localhost:8080/actuator/circuitbreakers | jq '.circuitBreakers.order
 
 1. Add authentication/authorization ✅ Completed in v1.1
 2. Implement circuit breakers (Resilience4j) ✅ Completed in v1.2
-3. Add saga patterns for distributed transactions
+3. Add saga patterns for distributed transactions ✅ Completed in v1.3
 4. Implement API rate limiting
 5. Add API versioning
 6. Enhance monitoring with alerts and SLOs

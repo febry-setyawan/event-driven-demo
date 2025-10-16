@@ -37,6 +37,17 @@ public class PaymentController {
         return ResponseEntity.notFound().build();
     }
 
+    @PostMapping("/{paymentId}/cancel")
+    public ResponseEntity<String> cancelPayment(@PathVariable Long paymentId) {
+        logger.info("Cancelling payment: {}", paymentId);
+        
+        boolean cancelled = paymentService.cancelPayment(paymentId);
+        if (cancelled) {
+            return ResponseEntity.ok("Payment cancelled");
+        }
+        return ResponseEntity.notFound().build();
+    }
+
     @GetMapping("/health")
     public ResponseEntity<String> health() {
         return ResponseEntity.ok("Payment Service is healthy");

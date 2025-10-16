@@ -83,6 +83,39 @@ public class PaymentService {
         return null;
     }
 
+    public boolean cancelPayment(Long paymentId) {
+        Optional<Payment> payment = paymentRepository.findById(paymentId);
+        
+        if (payment.isPresent()) {
+            Payment p = payment.get();
+            p.setStatus("CANCELLED");
+            paymentRepository.save(p);
+            
+            publishPaymentCancelledEvent(p);
+            logger.info("Payment cancelled: {}", paymentId);
+            return true;
+        }
+        
+        return false;
+    }
+
+    private void publishPaymentCancelledEvent(Payment payment) {
+        try {
+            Map<String, Object> event = new HashMap<>();
+            event.put("eventType", "PaymentCancelled");
+            event.put("paymentId", payment.getId());
+            event.put("orderId", payment.getOrderId());
+            event.put("timestamp", Instant.now().toString());
+
+            String eventJson = objectMapper.writeValueAsString(event);
+            kafkaTemplate.send(PAYMENT_EVENTS_TOPIC, payment.getId().toString(), eventJson);
+            
+            logger.info("Published PaymentCancelled event for payment: {}", payment.getId());
+        } catch (JsonProcessingException e) {
+            logger.error("Error publishing payment cancelled event", e);
+        }
+    }
+
     private void publishPaymentProcessedWithRetry(Payment payment) {
         int maxRetries = 3;
         int attempt = 0;
