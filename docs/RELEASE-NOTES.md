@@ -1,6 +1,53 @@
 # Release Notes
 
-## v1.1 - Authentication & Single Entry Point Architecture (Current)
+## v1.2 - Circuit Breaker Pattern (Current)
+
+**Release Date:** TBD
+
+### New Features
+- **Circuit Breaker with Resilience4j Reactor**: Prevent cascading failures in reactive WebClient calls
+  - Automatic failure detection and circuit opening
+  - Graceful degradation with fallback responses
+  - Self-healing with automatic half-open state transition
+  - Configurable failure thresholds and timeouts
+
+### Implementation
+- **API Gateway**: Circuit breaker for calls to Order Service and Payment Service using Resilience4j Reactor
+  - `GET /api/orders/{id}` - Circuit breaker for Order Service
+  - `GET /api/payments/{id}` - Circuit breaker for Payment Service
+- **Configuration**: 50% failure threshold, 10s wait duration, 10 calls sliding window, 5 minimum calls
+- **Fallback**: Returns HTTP 503 Service Unavailable when circuit is open
+- **Reactive Support**: Uses `CircuitBreakerOperator.of()` with `.transformDeferred()` for Mono/Flux
+
+### Circuit Breaker States
+- **CLOSED**: Normal operation, all requests pass through
+- **OPEN**: Circuit trips after failure threshold, requests fail fast with fallback
+- **HALF_OPEN**: After wait duration, allows limited requests to test service recovery
+
+### Monitoring
+- Circuit breaker state via actuator endpoints: `/actuator/circuitbreakers`
+- Circuit breaker events: `/actuator/circuitbreakerevents`
+- Health indicators for circuit breaker status
+- Event tracking for circuit state changes
+
+### Testing
+- Complete test coverage for all three states (CLOSED → OPEN → HALF_OPEN → CLOSED)
+- Test using actual endpoints with authentication
+- Documented test procedure in README.md
+
+### Technical Changes
+- Added dependencies:
+  - spring-cloud-starter-circuitbreaker-resilience4j (3.0.3)
+  - resilience4j-reactor (2.0.2)
+- Reactive circuit breaker using `CircuitBreakerOperator` and `transformDeferred()`
+- Enhanced actuator endpoints: circuitbreakers, circuitbreakerevents
+- Updated SecurityConfig to allow test endpoint without authentication
+
+---
+
+## v1.1 - Authentication & Single Entry Point Architecture
+
+**Release Date:** 2025-10-16
 
 **Release Date:** TBD
 

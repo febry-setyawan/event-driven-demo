@@ -5,6 +5,7 @@ import com.example.order.dto.PaymentRequest;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -67,26 +68,31 @@ public class OrderService {
 
         logger.info("Processing order: {}", orderId);
 
-        // Call Payment Service with retry
+        // Call Payment Service with circuit breaker
         PaymentRequest paymentRequest = new PaymentRequest(orderId, amount);
-        
-        webClient.post()
+        try {
+            String response = callPaymentService(paymentRequest);
+            logger.info("Payment processed for order: {}", orderId);
+            order.setStatus("COMPLETED");
+        } catch (Exception e) {
+            logger.error("Payment failed for order: {}", orderId, e);
+            order.setStatus("FAILED");
+        }
+    }
+
+    @CircuitBreaker(name = "paymentService", fallbackMethod = "paymentServiceFallback")
+    private String callPaymentService(PaymentRequest paymentRequest) {
+        return webClient.post()
                 .uri(paymentServiceUrl + "/payments")
                 .bodyValue(paymentRequest)
                 .retrieve()
                 .bodyToMono(String.class)
-                .retry(3) // Retry up to 3 times
-                .subscribe(
-                    response -> {
-                        logger.info("Payment processed for order: {}", orderId);
-                        order.setStatus("COMPLETED");
-                    },
-                    error -> {
-                        logger.error("Payment failed for order: {} after retries", orderId, error);
-                        order.setStatus("FAILED");
-                        // In production: trigger compensation/rollback logic
-                    }
-                );
+                .block();
+    }
+
+    private String paymentServiceFallback(PaymentRequest paymentRequest, Exception ex) {
+        logger.error("Circuit breaker fallback for payment service, order: {}, error: {}", paymentRequest.getOrderId(), ex.getMessage());
+        return "PAYMENT_SERVICE_UNAVAILABLE";
     }
 
     public OrderResponse getOrder(Long orderId) {
