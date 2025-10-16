@@ -2,7 +2,7 @@
 
 ## v1.2 - Circuit Breaker Pattern (Current)
 
-**Release Date:** TBD
+**Release Date:** 2025-10-16
 
 ### New Features
 - **Circuit Breaker with Resilience4j Reactor**: Prevent cascading failures in reactive WebClient calls
