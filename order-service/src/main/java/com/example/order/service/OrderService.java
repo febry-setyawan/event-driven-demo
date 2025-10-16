@@ -1,24 +1,22 @@
 package com.example.order.service;
 
 import com.example.order.dto.OrderResponse;
-import com.example.order.dto.PaymentRequest;
+import com.example.order.entity.Order;
+import com.example.order.entity.SagaState;
+import com.example.order.repository.OrderRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 
 @Service
 public class OrderService {
@@ -28,11 +26,11 @@ public class OrderService {
     @Autowired
     private ObjectMapper objectMapper;
 
-    @Value("${payment.service.url:http://payment-service:8082}")
-    private String paymentServiceUrl;
+    @Autowired
+    private SagaOrchestrator sagaOrchestrator;
 
-    private final WebClient webClient = WebClient.builder().build();
-    private final ConcurrentHashMap<Long, OrderResponse> orders = new ConcurrentHashMap<>();
+    @Autowired
+    private OrderRepository orderRepository;
 
     @KafkaListener(topics = "order-events", groupId = "order-service-group")
     public void handleOrderEvent(String message) {
@@ -62,41 +60,34 @@ public class OrderService {
         Integer quantity = event.get("quantity").asInt();
         BigDecimal amount = new BigDecimal(event.get("amount").asText());
 
-        // Store order in memory
-        OrderResponse order = new OrderResponse(orderId, customerId, productId, quantity, amount, "PROCESSING");
-        orders.put(orderId, order);
+        Order order = new Order(customerId, productId, quantity, amount, "PROCESSING");
+        order = orderRepository.save(order);
+        Long dbOrderId = order.getId();
 
-        logger.info("Processing order: {}", orderId);
+        logger.info("Processing order: {} (API order_id: {})", dbOrderId, orderId);
 
-        // Call Payment Service with circuit breaker
-        PaymentRequest paymentRequest = new PaymentRequest(orderId, amount);
-        try {
-            String response = callPaymentService(paymentRequest);
-            logger.info("Payment processed for order: {}", orderId);
-            order.setStatus("COMPLETED");
-        } catch (Exception e) {
-            logger.error("Payment failed for order: {}", orderId, e);
-            order.setStatus("FAILED");
+        sagaOrchestrator.startSaga(dbOrderId, customerId, productId, quantity, amount);
+
+        Optional<SagaState> sagaState = sagaOrchestrator.getSagaState(dbOrderId);
+        if (sagaState.isPresent()) {
+            order.setStatus(sagaState.get().getStatus());
+            orderRepository.save(order);
         }
     }
 
-    @CircuitBreaker(name = "paymentService", fallbackMethod = "paymentServiceFallback")
-    private String callPaymentService(PaymentRequest paymentRequest) {
-        return webClient.post()
-                .uri(paymentServiceUrl + "/payments")
-                .bodyValue(paymentRequest)
-                .retrieve()
-                .bodyToMono(String.class)
-                .block();
-    }
-
-    private String paymentServiceFallback(PaymentRequest paymentRequest, Exception ex) {
-        logger.error("Circuit breaker fallback for payment service, order: {}, error: {}", paymentRequest.getOrderId(), ex.getMessage());
-        return "PAYMENT_SERVICE_UNAVAILABLE";
-    }
-
     public OrderResponse getOrder(Long orderId) {
-        return orders.get(orderId);
+        Optional<Order> orderOpt = orderRepository.findById(orderId);
+        if (orderOpt.isPresent()) {
+            Order order = orderOpt.get();
+            Optional<SagaState> sagaState = sagaOrchestrator.getSagaState(orderId);
+            if (sagaState.isPresent()) {
+                order.setStatus(sagaState.get().getStatus());
+                orderRepository.save(order);
+            }
+            return new OrderResponse(order.getId(), order.getCustomerId(), order.getProductId(), 
+                order.getQuantity(), order.getAmount(), order.getStatus());
+        }
+        return null;
     }
 
     private void sendToDeadLetterQueue(String originalMessage, String errorType, String errorMessage) {

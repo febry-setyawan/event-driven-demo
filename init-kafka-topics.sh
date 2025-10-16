@@ -28,6 +28,17 @@ kafka-topics --create \
 
 echo "✓ Created payment-events topic"
 
+# Create compensation-events topic
+kafka-topics --create \
+  --bootstrap-server localhost:9092 \
+  --topic compensation-events \
+  --partitions 3 \
+  --replication-factor 1 \
+  --if-not-exists \
+  --config retention.ms=604800000
+
+echo "✓ Created compensation-events topic"
+
 # Create dead-letter-queue topic
 kafka-topics --create \
   --bootstrap-server localhost:9092 \

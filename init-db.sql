@@ -31,6 +31,22 @@ CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 -- Unique constraint for idempotency
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_order_id_unique ON payments(order_id);
 
+-- Create saga_state table for distributed transaction management
+CREATE TABLE IF NOT EXISTS saga_state (
+    id BIGSERIAL PRIMARY KEY,
+    order_id BIGINT NOT NULL UNIQUE,
+    status VARCHAR(50) NOT NULL,
+    current_step VARCHAR(50),
+    payment_id BIGINT,
+    timeout_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create indexes for saga_state
+CREATE INDEX IF NOT EXISTS idx_saga_state_order_id ON saga_state(order_id);
+CREATE INDEX IF NOT EXISTS idx_saga_state_status ON saga_state(status);
+
 -- Insert sample data for testing
 INSERT INTO orders (customer_id, product_id, quantity, amount, status) VALUES
 ('customer-001', 'product-001', 2, 99.99, 'COMPLETED'),
@@ -41,4 +57,9 @@ ON CONFLICT DO NOTHING;
 INSERT INTO payments (order_id, amount, status) VALUES
 (1, 99.99, 'COMPLETED'),
 (3, 299.97, 'COMPLETED')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO saga_state (order_id, status, current_step, payment_id) VALUES
+(1, 'COMPLETED', 'PAYMENT_COMPLETED', 1),
+(3, 'COMPLETED', 'PAYMENT_COMPLETED', 2)
 ON CONFLICT DO NOTHING;

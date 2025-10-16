@@ -54,6 +54,9 @@ services:
         kafka-topics --create --bootstrap-server kafka:29092 --topic payment-events --partitions 3 --replication-factor 1 --if-not-exists --config retention.ms=604800000
         echo "✓ Created payment-events topic"
         
+        kafka-topics --create --bootstrap-server kafka:29092 --topic compensation-events --partitions 3 --replication-factor 1 --if-not-exists --config retention.ms=604800000
+        echo "✓ Created compensation-events topic"
+        
         kafka-topics --create --bootstrap-server kafka:29092 --topic dead-letter-queue --partitions 1 --replication-factor 1 --if-not-exists --config retention.ms=2592000000
         echo "✓ Created dead-letter-queue topic"
         
