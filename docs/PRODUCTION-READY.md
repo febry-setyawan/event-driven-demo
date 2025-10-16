@@ -115,17 +115,33 @@ CREATE UNIQUE INDEX idx_payments_order_id_unique ON payments(order_id);
 - Alert on DLQ threshold
 
 ### 2. Circuit Breaker
-- Prevent cascading failures
-- Fast fail when service is down
-- Automatic recovery detection
-
-Example with Resilience4j:
+**Implemented with Resilience4j Reactor** for reactive WebClient calls:
 ```java
-@CircuitBreaker(name = "paymentService", fallbackMethod = "paymentFallback")
-public Mono<String> callPaymentService(PaymentRequest request) {
-    return webClient.post()...
-}
+io.github.resilience4j.circuitbreaker.CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker("orderService");
+
+return webClient.get()
+    .uri(orderServiceUrl + "/orders/health")
+    .retrieve()
+    .bodyToMono(String.class)
+    .transformDeferred(CircuitBreakerOperator.of(cb))
+    .onErrorResume(ex -> Mono.just(fallbackResponse));
 ```
+
+**Configuration:**
+- Sliding window: 10 calls
+- Failure threshold: 50%
+- Wait duration in OPEN state: 10 seconds
+- Automatic transition to HALF_OPEN
+
+**States:**
+- **CLOSED**: Normal operation
+- **OPEN**: Fails fast after threshold reached
+- **HALF_OPEN**: Tests service recovery
+
+**Future Enhancements:**
+- Add more circuit breaker instances for other integrations
+- Fine-tune thresholds based on SLA requirements
+- Implement bulkhead pattern for resource isolation
 
 ### 3. Saga Pattern
 - Implement compensation logic
@@ -287,15 +303,20 @@ public Mono<String> callPaymentService(PaymentRequest request) {
 ## Summary
 
 This POC implements **foundational production-ready patterns**:
-✅ **JWT Authentication** - Token-based authentication with Redis storage
-✅ **Single Entry Point** - API Gateway as the only external access point
-✅ **Idempotency** - Prevents duplicate payments
-✅ **Retry Mechanism** - HTTP calls and event publishing with exponential backoff
-✅ **Dead Letter Queue** - Failed message handling
-✅ **Error Handling** - Comprehensive exception handling
-✅ **Observability** - LGTM stack (Loki, Grafana, Tempo, Mimir)
-✅ **Database Optimizations** - Indexes and unique constraints
-✅ **Sequential Startup** - Health check-based dependencies
-✅ **Auto-create Topics** - Kafka topics created automatically
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| **JWT Authentication** | ✅ | Token-based authentication with Redis storage and 24-hour expiration |
+| **Single Entry Point** | ✅ | API Gateway as the only external access point, internal services isolated |
+| **Circuit Breaker** | ✅ | Resilience4j Reactor for preventing cascading failures (orderService, paymentService) |
+| **Idempotency** | ✅ | Prevents duplicate payments via database unique constraints |
+| **Retry Mechanism** | ✅ | HTTP calls and event publishing with exponential backoff |
+| **Dead Letter Queue** | ✅ | Failed message handling with full error metadata |
+| **Error Handling** | ✅ | Comprehensive exception handling with structured logging |
+| **Observability** | ✅ | LGTM stack (Loki, Grafana, Tempo, Mimir) with distributed tracing |
+| **Database Optimizations** | ✅ | Indexes and unique constraints for performance and data integrity |
+| **Sequential Startup** | ✅ | Health check-based container dependencies |
+| **Auto-create Topics** | ✅ | Kafka topics created automatically on startup |
+| **API Documentation** | ✅ | Interactive Swagger UI at API Gateway |
 
 For full production readiness, implement the additional patterns listed above based on your specific requirements and SLAs.

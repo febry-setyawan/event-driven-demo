@@ -3,6 +3,9 @@ package com.example.gateway.controller;
 import com.example.gateway.dto.OrderRequest;
 import com.example.gateway.dto.OrderResponse;
 import com.example.gateway.service.OrderEventService;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.reactor.circuitbreaker.operator.CircuitBreakerOperator;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -10,6 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -28,6 +32,9 @@ public class OrderController {
 
     @Autowired
     private OrderEventService orderEventService;
+
+    @Autowired
+    private CircuitBreakerRegistry circuitBreakerRegistry;
 
     @Value("${order.service.url:http://order-service:8081}")
     private String orderServiceUrl;
@@ -61,13 +68,19 @@ public class OrderController {
     @Operation(summary = "Get order", description = "Retrieve order details by ID")
     public Mono<ResponseEntity<OrderResponse>> getOrder(@PathVariable Long orderId) {
         logger.info("Getting order: {}", orderId);
+        io.github.resilience4j.circuitbreaker.CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker("orderService");
         
         return webClient.get()
                 .uri(orderServiceUrl + "/orders/" + orderId)
                 .retrieve()
                 .bodyToMono(OrderResponse.class)
+                .timeout(java.time.Duration.ofSeconds(5))
+                .transformDeferred(CircuitBreakerOperator.of(cb))
                 .map(ResponseEntity::ok)
-                .onErrorReturn(ResponseEntity.notFound().build());
+                .onErrorResume(ex -> {
+                    logger.error("Circuit breaker fallback for order: {}, error: {}", orderId, ex.getMessage());
+                    return Mono.just(ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build());
+                });
     }
 
     @GetMapping("/health")

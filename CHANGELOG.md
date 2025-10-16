@@ -2,7 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [v1.1] - TBD
+## [Unreleased]
+
+### Added
+- **Circuit Breaker Pattern** with Resilience4j
+  - Circuit breaker for API Gateway → Order Service calls
+  - Circuit breaker for Order Service → Payment Service calls
+  - Automatic failure detection and circuit opening
+  - Graceful fallback responses when circuit is open
+  - Actuator endpoints for monitoring circuit breaker state
+  - Configurable thresholds and timeouts
+
+### Changed
+- Enhanced resilience with automatic circuit breaking
+- Improved error handling with fallback methods
+- Added circuit breaker health indicators
+
+### Technical Details
+- **New Dependency**: spring-cloud-starter-circuitbreaker-resilience4j (3.0.3)
+- **Configuration**: Sliding window size: 10, Failure threshold: 50%, Wait duration: 10s
+- **Monitoring**: `/actuator/circuitbreakers` and `/actuator/circuitbreakerevents` endpoints
+- **Fallback**: Returns HTTP 503 when circuit is open
+
+---
+
+## [v1.1] - 2025-10-16
 
 ### Added
 - **JWT Authentication System**

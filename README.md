@@ -315,6 +315,7 @@ ab -n 1000 -c 10 -H "Content-Type: application/json" \
 |---------|--------|-------------|
 | **JWT Authentication** | ✅ | Secure API endpoints with token-based authentication |
 | **API Documentation** | ✅ | Interactive Swagger UI for all services |
+| **Circuit Breaker** | ✅ | Resilience4j for preventing cascading failures |
 | **Idempotency** | ✅ | Prevents duplicate payments via database constraints |
 | **Retry Mechanism** | ✅ | HTTP calls and event publishing with exponential backoff |
 | **Dead Letter Queue** | ✅ | Failed messages captured with full error metadata |
@@ -333,10 +334,77 @@ For more details, see [docs/PRODUCTION-READY.md](docs/PRODUCTION-READY.md)
 - [Production-Ready Features](docs/PRODUCTION-READY.md)
 - [Release Notes](docs/RELEASE-NOTES.md)
 
+## Monitoring Circuit Breakers
+
+Circuit breaker state can be monitored via actuator endpoints:
+
+```bash
+# Check circuit breaker status
+curl http://localhost:8080/actuator/circuitbreakers
+
+# Check circuit breaker events
+curl http://localhost:8080/actuator/circuitbreakerevents
+
+# Check health including circuit breakers
+curl http://localhost:8080/actuator/health
+```
+
+**Circuit Breaker States:**
+- **CLOSED**: Normal operation, requests pass through
+- **OPEN**: Circuit is open, requests fail fast with fallback
+- **HALF_OPEN**: Testing if service recovered, limited requests allowed
+
+### Testing Circuit Breaker
+
+Test circuit breaker state transitions:
+
+```bash
+# Get JWT token
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin"}' | jq -r '.token')
+
+# 1. Stop order-service to simulate failure
+docker-compose stop order-service
+
+# 2. Make 10 requests to trigger OPEN state
+for i in {1..10}; do
+  curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/orders/1
+  sleep 0.3
+done
+
+# 3. Check state (should be OPEN)
+curl http://localhost:8080/actuator/circuitbreakers | jq '.circuitBreakers.orderService.state'
+
+# 4. Wait 10 seconds for HALF_OPEN transition
+sleep 10
+
+# 5. Check state (should be HALF_OPEN)
+curl http://localhost:8080/actuator/circuitbreakers | jq '.circuitBreakers.orderService.state'
+
+# 6. Restart order-service
+docker-compose start order-service
+sleep 8
+
+# 7. Create order and make successful requests to close circuit
+curl -X POST http://localhost:8080/api/orders \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"customerId": "test", "productId": "prod", "quantity": 1, "amount": 100.00}'
+
+for i in {1..5}; do
+  curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/orders/1
+  sleep 0.5
+done
+
+# 8. Check state (should be CLOSED)
+curl http://localhost:8080/actuator/circuitbreakers | jq '.circuitBreakers.orderService.state'
+```
+
 ## Next Steps
 
-1. Add authentication/authorization ✅ (Completed in v1.1)
-2. Implement circuit breakers (Resilience4j)
+1. Add authentication/authorization ✅ Completed in v1.1
+2. Implement circuit breakers (Resilience4j) ✅ Completed in v1.2
 3. Add saga patterns for distributed transactions
 4. Implement API rate limiting
 5. Add API versioning
