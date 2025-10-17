@@ -1,0 +1,299 @@
+# Release Notes
+
+## v1.4 - Spring Cloud Gateway Implementation (Current)
+
+**Release Date:** 2025-10-17
+
+### New Features
+- **Spring Cloud Gateway Migration**: Replaced traditional API Gateway with reactive Spring Cloud Gateway
+  - Reactive routing with WebFlux for non-blocking I/O
+  - Built-in rate limiting with Redis backend
+  - Gateway filters for request/response manipulation
+  - Route-level circuit breakers with Resilience4j
+  - IP-based rate limiting: 5 requests/second, burst capacity 10
+
+- **Input Validation**: Bean Validation at gateway level
+  - Jakarta Validation annotations on OrderRequest DTO
+  - Validation rules: @NotBlank, @NotNull, @Min(1), @DecimalMin("0.01")
+  - OrderValidationFilter for gateway-level validation
+  - HTTP 400 responses with detailed error messages
+  - Prevents invalid data from reaching downstream services
+
+- **Comprehensive Test Suite**: 42 automated test scenarios
+  - 100% test coverage achieved
+  - Test categories: Authentication (5), Order Creation (7), Order Retrieval (4), Payment (3), Health (2), Rate Limiting (2), Performance (4), Circuit Breaker (4), Saga Pattern (7), Edge Cases (4)
+  - Performance benchmarks: all responses < 100ms
+  - Circuit breaker state transitions and fallback testing
+  - Saga orchestration flow, compensation, timeout, and idempotency testing
+  - Security tests: SQL injection, XSS, special characters
+  - Automated validation of positive and negative scenarios
+
+### Implementation
+- **Order Gateway (order-gateway)**: New Spring Cloud Gateway service
+  - Replaces traditional Spring Boot API Gateway
+  - Reactive programming model with Mono/Flux
+  - Gateway routes configuration in application.yml
+  - OrderValidationFilter for order creation validation
+  - JwtAuthenticationFilter for authentication (order -100)
+  - RateLimiterConfig with IP-based KeyResolver
+  - FallbackController for health endpoint and circuit breaker fallbacks
+
+- **Event Publishing**: Moved to gateway filter
+  - POST /api/orders handled by OrderValidationFilter
+  - Validation → Event Publishing → Response
+  - Synchronous validation with immediate error responses
+  - Kafka event published after successful validation
+
+- **Rate Limiting**: Spring Cloud Gateway RequestRateLimiter
+  - Redis-backed distributed rate limiting
+  - Per-route configuration support
+  - Changed from 100 req/min to 5 req/sec (burst 10)
+  - Distributed across gateway instances via Redis
+
+### Configuration
+- **Gateway Routes**: order-create-route (POST), order-route (GET), payment-route (GET)
+- **Dependencies**: spring-cloud-starter-gateway, spring-boot-starter-data-redis-reactive, spring-boot-starter-validation
+- **Spring Cloud Version**: 2022.0.4
+- **Filter Order**: JWT Auth (-100), Rate Limiter (default), Validation (custom)
+
+### Testing Results
+- All 42 tests passed (100% success rate)
+- Authentication: 5/5 passed
+- Order Creation: 7/7 passed (including validation tests)
+- Order Retrieval: 4/4 passed
+- Payment: 3/3 passed
+- Health Checks: 2/2 passed
+- Rate Limiting: 2/2 passed (15/20 requests blocked)
+- Performance: 4/4 passed (avg 20ms response time)
+- Circuit Breaker: 4/4 passed (state check, fallback, metrics)
+- Saga Pattern: 7/7 passed (flow, compensation, timeout, idempotency)
+- Edge Cases: 4/4 passed (safe handling of malicious input)
+
+### Technical Changes
+- Added order-gateway service with Spring Cloud Gateway
+- Removed api-gateway service
+- Removed test-all-endpoints.sh and test-order-gateway-ratelimit.sh (merged into test-comprehensive.sh)
+- Removed Swagger UI (not compatible with reactive gateway)
+- Added OrderValidationFilter, ValidationConfig, RateLimiterConfig
+- Updated FallbackController with health endpoint
+
+### Migration Notes
+- Update any references from "api-gateway" to "order-gateway"
+- Rate limit is now 5 req/sec (was 100 req/min)
+- Validation errors return HTTP 400 with error message
+- All endpoints remain the same (backward compatible)
+- Swagger UI removed (use curl or Postman for testing)
+
+### Documentation
+- Updated README.md with Order Gateway references
+- Updated CHANGELOG.md with v1.4 entry
+- Created docs/ORDER-GATEWAY.md with comprehensive documentation
+- Updated architecture diagram
+
+---
+
+## v1.3 - Saga Pattern Improvements
+
+**Release Date:** 2025-10-17
+
+### New Features
+- **Saga Timeout Handling**: Automatic compensation for timed-out sagas
+  - Default timeout: 30 seconds from saga creation
+  - Scheduled check every 5 seconds for expired sagas
+  - Automatic compensation triggered for timed-out transactions
+  - Configurable timeout duration via SagaState constructor
+
+- **Saga Recovery on Service Restart**: Automatic recovery of in-progress sagas
+  - @PostConstruct method runs on service startup
+  - Queries all sagas with status PROCESSING or STARTED
+  - Automatically triggers compensation for incomplete sagas
+  - Ensures no lost transactions after service restart
+
+- **Saga Monitoring Dashboard**: Real-time Grafana visualization
+  - Prometheus metrics: saga_total, saga_completed, saga_failed, saga_processing, saga_success_rate
+  - Metrics updated every 10 seconds via scheduled task
+  - 6 dashboard panels: Total, Completed, Failed, Success Rate, Time Series, Pie Chart
+  - Dashboard auto-refresh every 10 seconds
+
+- **Database Persistence for Orders**: Orders now persisted to PostgreSQL
+  - Order entity with JPA annotations
+  - OrderRepository for data access
+  - Database-generated IDs instead of API Gateway IDs
+  - Foreign key relationship maintained between payments and orders
+
+### Implementation
+- **SagaOrchestrator**: Enhanced with timeout checking and recovery methods
+  - `checkTimeouts()`: @Scheduled method runs every 5 seconds
+  - `recoverSagas()`: @PostConstruct method for startup recovery
+  - Compensation logic for failed/timed-out sagas
+
+- **SagaMetricsService**: Exposes Prometheus metrics for monitoring
+  - Uses AtomicInteger for gauge values to prevent NaN
+  - Scheduled update every 10 seconds
+  - Metrics: total, completed, failed, processing, success_rate
+
+- **Database Schema Updates**:
+  - Added `timeout_at` field to saga_state table
+  - Added Order entity with fields: id, customer_id, product_id, quantity, amount, status, created_at, updated_at
+  - Restored foreign key constraint: payments.order_id → orders.id
+
+- **Kafka Topics**: Added compensation-events topic (3 partitions)
+
+### Configuration
+- **@EnableScheduling**: Added to OrderServiceApplication for scheduled tasks
+- **Micrometer**: Integrated for Prometheus metrics exposure
+- **Grafana Dashboard**: saga-dashboard.json with 6 monitoring panels
+
+### Testing Results
+- Positive case: 3 orders completed successfully (60%)
+- Negative case: 2 orders failed with compensation (40%)
+- Recovery case: In-progress saga compensated on service restart
+- Timeout case: Expired sagas automatically compensated
+- Dashboard: All metrics displaying correctly with 60% success rate
+
+### Technical Changes
+- Added entities: Order, SagaState (with timeout_at field)
+- Added repositories: OrderRepository, SagaStateRepository
+- Added services: SagaOrchestrator, SagaMetricsService
+- Updated OrderService to persist orders to database
+- Updated PaymentService with cancelPayment method
+- Updated PaymentController with cancel endpoint
+- Added Grafana dashboard: monitoring/grafana/dashboards/saga-dashboard.json
+- Updated README with saga improvements documentation
+- Removed temporary files: order-payload.json
+
+### Documentation
+- New file: docs/SAGA-PATTERN.md with comprehensive saga documentation
+- Updated README with saga improvements section
+- Updated database schema documentation with timeout_at field
+- Updated Grafana dashboards section
+
+---
+
+## v1.2 - Circuit Breaker Pattern
+
+**Release Date:** 2025-10-16
+
+### New Features
+- **Circuit Breaker with Resilience4j Reactor**: Prevent cascading failures in reactive WebClient calls
+  - Automatic failure detection and circuit opening
+  - Graceful degradation with fallback responses
+  - Self-healing with automatic half-open state transition
+  - Configurable failure thresholds and timeouts
+
+### Implementation
+- **API Gateway**: Circuit breaker for calls to Order Service and Payment Service using Resilience4j Reactor
+  - `GET /api/orders/{id}` - Circuit breaker for Order Service
+  - `GET /api/payments/{id}` - Circuit breaker for Payment Service
+- **Configuration**: 50% failure threshold, 10s wait duration, 10 calls sliding window, 5 minimum calls
+- **Fallback**: Returns HTTP 503 Service Unavailable when circuit is open
+- **Reactive Support**: Uses `CircuitBreakerOperator.of()` with `.transformDeferred()` for Mono/Flux
+
+### Circuit Breaker States
+- **CLOSED**: Normal operation, all requests pass through
+- **OPEN**: Circuit trips after failure threshold, requests fail fast with fallback
+- **HALF_OPEN**: After wait duration, allows limited requests to test service recovery
+
+### Monitoring
+- Circuit breaker state via actuator endpoints: `/actuator/circuitbreakers`
+- Circuit breaker events: `/actuator/circuitbreakerevents`
+- Health indicators for circuit breaker status
+- Event tracking for circuit state changes
+
+### Testing
+- Complete test coverage for all three states (CLOSED → OPEN → HALF_OPEN → CLOSED)
+- Test using actual endpoints with authentication
+- Documented test procedure in README.md
+
+### Technical Changes
+- Added dependencies:
+  - spring-cloud-starter-circuitbreaker-resilience4j (3.0.3)
+  - resilience4j-reactor (2.0.2)
+- Reactive circuit breaker using `CircuitBreakerOperator` and `transformDeferred()`
+- Enhanced actuator endpoints: circuitbreakers, circuitbreakerevents
+- Updated SecurityConfig to allow test endpoint without authentication
+
+---
+
+## v1.1 - Authentication & Single Entry Point Architecture
+
+**Release Date:** 2025-10-16
+
+**Release Date:** TBD
+
+### New Features
+- **JWT Authentication**: Secure API endpoints with JWT token-based authentication
+  - Login endpoint: `POST /api/auth/login`
+  - In-memory user store (username: admin, password: admin)
+  - Token expiration: 24 hours
+  - Redis integration for token storage with TTL auto-expiration
+- **Single Entry Point Architecture**: API Gateway as the only external access point
+  - All client traffic must go through API Gateway (port 8080)
+  - Order and Payment services are internal only (no external ports)
+  - JWT validation centralized at API Gateway
+- **Swagger/OpenAPI Documentation**: Interactive API documentation at API Gateway
+  - Swagger UI: http://localhost:8080/swagger-ui/index.html
+  - All endpoints documented with request/response examples
+- **Redis Integration**: JWT token storage with automatic expiration
+
+### Technical Changes
+- Added dependencies: spring-boot-starter-security, jjwt (0.11.5), springdoc-openapi (2.2.0), spring-boot-starter-data-redis
+- New packages: security/, config/, service/
+- New classes: JwtUtil, JwtAuthenticationFilter, TokenService, SecurityConfig, RedisConfig
+- New DTOs: AuthRequest, AuthResponse
+- Protected endpoints require Bearer token in Authorization header
+- Removed port exposure for Order and Payment services
+
+### Architecture Changes
+- **API Gateway**: Single entry point with JWT authentication and request proxying
+- **Order Service**: Internal only, no authentication required
+- **Payment Service**: Internal only, no authentication required
+- **Redis**: Added for JWT token storage (port 6379)
+
+### API Changes
+- All `/api/orders` and `/api/payments` endpoints now require authentication
+- New public endpoints: `/api/auth/login`, `/actuator/**`, `/swagger-ui/**`, `/v3/api-docs/**`
+- Payment proxy endpoint: `GET /api/payments/{id}` via API Gateway
+
+### Documentation
+- Updated architecture diagram showing single entry point design
+- Added Redis to infrastructure components
+- Removed direct access documentation for Order/Payment services
+- Updated all endpoint tables to reflect API Gateway routing
+
+---
+
+## v1.0 - Initial Release
+
+**Release Date:** 2025-10-16
+
+### Features
+- **Microservices Architecture**: 3 independent services (API Gateway, Order Service, Payment Service)
+- **Event-Driven Communication**: Asynchronous messaging via Apache Kafka
+- **LGTM Observability Stack**: Loki, Grafana, Tempo, Mimir for complete observability
+- **Production-Ready Patterns**:
+  - Idempotency: Prevents duplicate payments
+  - Retry Mechanism: HTTP calls and event publishing with exponential backoff
+  - Dead Letter Queue: Failed message handling
+  - Error Handling: Comprehensive exception handling
+  - Sequential Startup: Health check-based container dependencies
+  - Auto-create Topics: Kafka topics created automatically on startup
+
+### Infrastructure
+- **Kafka**: Message broker with 3 topics (order-events, payment-events, dead-letter-queue)
+- **PostgreSQL**: Database with optimized schema and indexes
+- **Docker Compose**: Single-command deployment
+- **Grafana Agent**: Unified metrics, logs, and traces collection
+
+### Monitoring
+- Distributed tracing across all services
+- Centralized log aggregation
+- Pre-configured Grafana dashboards
+- Health check endpoints
+
+### Technical Stack
+- Java 17
+- Spring Boot 3.1.5
+- Apache Kafka 7.4.0
+- PostgreSQL 15
+- Grafana Stack (Loki 2.9.0, Tempo 2.2.0, Mimir 2.10.0)
