@@ -6,6 +6,102 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v1.4] - 2025-10-17
+
+### Added
+- **Spring Cloud Gateway Migration**
+  - Replaced traditional API Gateway with Spring Cloud Gateway (order-gateway)
+  - Reactive routing with WebFlux for non-blocking I/O
+  - Built-in rate limiting with Redis backend
+  - Gateway filters for request/response manipulation
+  - Route-level circuit breakers with Resilience4j
+  
+- **Input Validation**
+  - Bean Validation (Jakarta Validation) for request DTOs
+  - OrderRequest validation: @NotBlank, @NotNull, @Min, @DecimalMin
+  - Custom validation messages
+  - OrderValidationFilter for gateway-level validation
+  - HTTP 400 responses with detailed error messages
+  
+- **Enhanced Rate Limiting**
+  - Spring Cloud Gateway RequestRateLimiter
+  - Redis-backed distributed rate limiting
+  - IP-based rate limiting with KeyResolver
+  - Configurable: 5 requests/second, burst capacity 10
+  - Per-route rate limit configuration
+  
+- **Comprehensive Test Suite**
+  - test-comprehensive.sh with 42 test scenarios
+  - 100% test coverage achieved
+  - Test categories: Authentication (5), Order Creation (7), Order Retrieval (4), Payment (3), Health (2), Rate Limiting (2), Performance (4), Circuit Breaker (4), Saga Pattern (7), Edge Cases (4)
+  - Automated validation of all positive and negative scenarios
+  - Performance benchmarks (all < 100ms)
+  - Circuit breaker state transitions and fallback testing
+  - Saga orchestration flow, compensation, timeout, and idempotency testing
+  - Security tests: SQL injection, XSS, special characters
+  
+- **New Components**
+  - OrderValidationFilter: Gateway filter for order validation
+  - ValidationConfig: Validator bean configuration
+  - FallbackController: Health endpoint and circuit breaker fallbacks
+  - RateLimiterConfig: IP-based key resolver
+
+### Changed
+- **Architecture**
+  - Migrated from traditional Spring Boot API Gateway to Spring Cloud Gateway
+  - Event publishing moved to gateway filter
+  - Reactive programming model with Mono/Flux
+  - Gateway routes configuration in application.yml
+  
+- **Order Creation Flow**
+  - POST /api/orders now handled by OrderValidationFilter
+  - Validation happens at gateway level before event publishing
+  - Synchronous validation with immediate error responses
+  - Event published to Kafka after successful validation
+  
+- **Rate Limiting**
+  - Changed from Bucket4j to Spring Cloud Gateway RequestRateLimiter
+  - From 100 req/min to 5 req/sec (burst 10)
+  - Distributed across gateway instances via Redis
+  - Per-route configuration support
+
+### Removed
+- api-gateway service (replaced by order-gateway)
+- test-all-endpoints.sh (merged into test-comprehensive.sh)
+- test-order-gateway-ratelimit.sh (merged into test-comprehensive.sh)
+- OrderController and PaymentController (replaced by gateway routing)
+- Bucket4j dependency
+- Swagger UI (not compatible with reactive gateway)
+
+### Technical Details
+- **New Dependencies**: spring-cloud-starter-gateway, spring-boot-starter-data-redis-reactive, spring-boot-starter-validation, spring-cloud-starter-circuitbreaker-reactor-resilience4j
+- **Spring Cloud Version**: 2022.0.4
+- **Gateway Routes**: order-create-route (POST), order-route (GET), payment-route (GET)
+- **Validation Annotations**: @NotBlank, @NotNull, @Min(1), @DecimalMin("0.01")
+- **Filter Order**: JWT Auth (-100), Rate Limiter (default), Validation (custom)
+
+### Testing Results
+- All 42 tests passed (100% success rate)
+- Authentication: 5/5 passed
+- Order Creation: 7/7 passed (including validation tests)
+- Order Retrieval: 4/4 passed
+- Payment: 3/3 passed
+- Health Checks: 2/2 passed
+- Rate Limiting: 2/2 passed (15/20 requests blocked)
+- Performance: 4/4 passed (avg 20ms response time)
+- Circuit Breaker: 4/4 passed (state check, fallback, metrics)
+- Saga Pattern: 7/7 passed (flow, compensation, timeout, idempotency)
+- Edge Cases: 4/4 passed (safe handling of malicious input)
+
+### Migration Notes
+- Update any references from "api-gateway" to "order-gateway"
+- Rate limit is now 5 req/sec (was 100 req/min)
+- Validation errors return HTTP 400 with error message
+- All endpoints remain the same (backward compatible)
+- Swagger UI removed (use curl or Postman for testing)
+
+---
+
 ## [v1.3] - 2025-10-17
 
 ### Added

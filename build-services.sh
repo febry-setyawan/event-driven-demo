@@ -32,5 +32,15 @@ if [ $? -ne 0 ]; then
 fi
 cd ..
 
+# Build Order Gateway
+echo "Building Order Gateway..."
+cd order-gateway
+mvn clean package -DskipTests
+if [ $? -ne 0 ]; then
+    echo "Failed to build Order Gateway"
+    exit 1
+fi
+cd ..
+
 echo "All services built successfully!"
 echo "You can now run: docker-compose up -d"

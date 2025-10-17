@@ -13,9 +13,9 @@ This POC demonstrates a complete Event-Driven Architecture using Spring Boot mic
                              │ (All traffic)
                              ▼
                     ┌─────────────────┐
-                    │   API Gateway   │◄─── Single Entry Point
-                    │   (Port 8080)   │     (JWT Authentication)
-                    │   + Redis       │
+                    │ Order Gateway   │◄─── Single Entry Point
+                    │   (Port 8080)   │     (Spring Cloud Gateway)
+                    │ + Redis + Kafka │     (JWT + Rate Limiting)
                     └────────┬────────┘
                              │
               ┌──────────────┼──────────────┐
@@ -38,20 +38,22 @@ This POC demonstrates a complete Event-Driven Architecture using Spring Boot mic
 ```
 
 **Key Points:**
-- All external traffic goes through API Gateway (port 8080)
+- All external traffic goes through Order Gateway (port 8080)
 - Order and Payment services are internal only (no external ports)
-- JWT authentication validated at API Gateway
+- JWT authentication validated at Order Gateway
 - Redis stores JWT tokens with TTL auto-expiration
+- Order Gateway publishes events to Kafka and routes requests
 - Order Service implements Saga orchestrator for distributed transactions
 - Both Order and Payment services persist data to PostgreSQL
 - Saga state tracked in database for compensation and recovery
+- Input validation with Bean Validation at gateway level
 
 ## Services
 
-1. **API Gateway** (Port 8080) - Single entry point with JWT authentication, proxies all requests to internal services
+1. **Order Gateway** (Port 8080) - Spring Cloud Gateway with JWT auth, rate limiting, circuit breaker, and Kafka event publishing
 2. **Order Service** (Internal) - Saga orchestrator, business logic, consumes Kafka events, persists orders and saga state to PostgreSQL
 3. **Payment Service** (Internal) - Payment processing, persists payments to PostgreSQL
-4. **Redis** (Port 6379) - JWT token storage with TTL auto-expiration
+4. **Redis** (Port 6379) - JWT token storage and rate limiting backend
 
 ## Monitoring Stack (LGTM)
 
@@ -121,8 +123,9 @@ docker-compose down -v
 ## Event Flow
 
 ### Happy Path (Successful Order)
-1. **API Gateway** receives HTTP POST request to create order
-2. **API Gateway** publishes `OrderCreated` event to **order-events** Kafka topic
+1. **Order Gateway** receives HTTP POST request to create order
+2. **Order Gateway** validates request with Bean Validation
+3. **Order Gateway** publishes `OrderCreated` event to **order-events** Kafka topic
 3. **Order Service** consumes the event and starts saga orchestration
 4. **Order Service** persists order to PostgreSQL with status PENDING
 5. **Order Service** creates saga state (STARTED → PROCESSING)
@@ -189,7 +192,7 @@ Distributed tracing available in Grafana Explore using Tempo data source:
 1. Go to Explore (compass icon)
 2. Select "Tempo" datasource
 3. Search traces by service name or trace ID
-4. Traces show the complete request flow: API Gateway → Order Service → Payment Service
+4. Traces show the complete request flow: Order Gateway → Order Service → Payment Service
 
 ## Development
 
@@ -200,7 +203,7 @@ Distributed tracing available in Grafana Explore using Tempo data source:
 ./build-services.sh
 
 # Or build individually
-cd api-gateway && mvn clean package
+cd order-gateway && mvn clean package
 cd order-service && mvn clean package  
 cd payment-service && mvn clean package
 ```
@@ -238,12 +241,9 @@ All API endpoints (except `/api/auth/login`) require JWT authentication.
 
 ## API Documentation
 
-Interactive API documentation available via Swagger UI at API Gateway:
-- **Swagger UI**: http://localhost:8080/swagger-ui/index.html
+All API requests must go through Order Gateway. Direct access to Order and Payment services is not allowed.
 
-All API requests must go through API Gateway. Direct access to Order and Payment services is not allowed.
-
-### API Gateway Endpoints
+### Order Gateway Endpoints
 
 | Method | Endpoint | Auth Required | Description |
 |--------|----------|---------------|-------------|
@@ -258,7 +258,7 @@ All API requests must go through API Gateway. Direct access to Order and Payment
 |--------|----------|---------------|-------------|
 | GET | `/api/payments/{id}` | Yes | Get payment details |
 
-**Note**: All endpoints are accessed through API Gateway. Order and Payment services are internal only.
+**Note**: All endpoints are accessed through Order Gateway. Order and Payment services are internal only.
 
 ## Kafka Topics
 
@@ -366,7 +366,7 @@ ab -n 1000 -c 10 -H "Content-Type: application/json" \
 | Feature | Status | Description |
 |---------|--------|-------------|
 | **JWT Authentication** | ✅ | Secure API endpoints with token-based authentication |
-| **API Documentation** | ✅ | Interactive Swagger UI for all services |
+| **Input Validation** | ✅ | Bean Validation with detailed error messages |
 | **Circuit Breaker** | ✅ | Resilience4j for preventing cascading failures |
 | **Idempotency** | ✅ | Prevents duplicate payments via database constraints |
 | **Retry Mechanism** | ✅ | HTTP calls and event publishing with exponential backoff |
@@ -382,6 +382,7 @@ ab -n 1000 -c 10 -H "Content-Type: application/json" \
 | **Saga Timeout Handling** | ✅ | Automatic compensation for timed-out sagas (30s default) |
 | **Saga Recovery** | ✅ | Automatic recovery of in-progress sagas on service restart |
 | **Saga Monitoring** | ✅ | Real-time Grafana dashboard with metrics and visualization |
+| **API Rate Limiting** | ✅ | Spring Cloud Gateway rate limiting with Redis (5 req/sec, burst 10) |
 
 For more details, see [docs/PRODUCTION-READY.md](docs/PRODUCTION-READY.md)
 
@@ -458,12 +459,72 @@ done
 curl http://localhost:8080/actuator/circuitbreakers | jq '.circuitBreakers.orderService.state'
 ```
 
+## Rate Limiting
+
+Order Gateway implements distributed rate limiting using Spring Cloud Gateway RequestRateLimiter with Redis backend.
+
+**Configuration:**
+- Default: 5 requests per second with burst capacity of 10
+- Distributed across multiple gateway instances via Redis
+- Configurable via application.yml
+
+**Configuration (application.yml):**
+```yaml
+redis-rate-limiter:
+  replenishRate: 5        # Tokens per second
+  burstCapacity: 10       # Maximum burst
+  requestedTokens: 1      # Tokens per request
+```
+
+**Testing Rate Limit:**
+```bash
+# Get JWT token
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin"}' | jq -r '.token')
+
+# Make 101 requests to trigger rate limit
+for i in {1..101}; do
+  curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/orders/1
+done
+
+# Expected: First 100 succeed, 101st returns 429 Too Many Requests
+```
+
+**Response when rate limited:**
+```json
+{
+  "error": "Too many requests. Please try again later."
+}
+```
+
+## Testing
+
+Comprehensive test suite with 42 test scenarios:
+
+```bash
+# Run all tests (100% coverage)
+./test-comprehensive.sh
+```
+
+**Test Coverage:**
+- Authentication (5 tests) - Valid/invalid credentials, empty fields, malformed JSON
+- Order Creation (7 tests) - Valid data, unauthorized, validation, edge cases
+- Order Retrieval (4 tests) - Existing, non-existent, unauthorized, invalid format
+- Payment (3 tests) - Existing, unauthorized, non-existent
+- Health Checks (2 tests) - Actuator, orders health
+- Rate Limiting (2 tests) - Enforcement, recovery
+- Performance (4 tests) - Response time, concurrent requests
+- Circuit Breaker (4 tests) - State check, service availability, fallback, metrics
+- Saga Pattern (7 tests) - Order flow, status, payment, idempotency, compensation, timeout, metrics
+- Edge Cases (4 tests) - Long input, special characters, SQL injection, XSS
+
 ## Next Steps
 
 1. Add authentication/authorization ✅ Completed in v1.1
 2. Implement circuit breakers (Resilience4j) ✅ Completed in v1.2
 3. Add saga patterns for distributed transactions ✅ Completed in v1.3
-4. Implement API rate limiting
+4. Implement Spring Cloud Gateway for rate limiting, input validation, etc ✅ Completed in v1.4
 5. Add API versioning
 6. Enhance monitoring with alerts and SLOs
 
