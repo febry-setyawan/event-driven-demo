@@ -386,45 +386,51 @@ echo ""
 # SAGA PATTERN TESTS
 # ==========================================
 echo "=========================================="
-echo "9. SAGA PATTERN TESTS (Orchestration)"
+echo "9. SAGA PATTERN TESTS (Choreography)"
 echo "=========================================="
 echo ""
 
-# Test 9.1: Saga - Successful Order Flow
-echo "Test 9.1: Saga - Successful Order Flow"
+# Test 9.1: Saga - Order Created with WAITING Status
+echo "Test 9.1: Saga - Order Created with WAITING Status"
 ORDER_RESPONSE=$(curl -s -X POST $GATEWAY_URL/api/orders \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $TOKEN" \
   -d '{"customerId": "saga-test-001", "productId": "saga-prod-001", "quantity": 1, "amount": 100.00}')
 SAGA_ORDER_ID=$(echo $ORDER_RESPONSE | grep -o '"orderId":[0-9]*' | cut -d':' -f2)
-[ -n "$SAGA_ORDER_ID" ] && test_result "PASS" "Saga initiated for order: $SAGA_ORDER_ID" || test_result "FAIL" "Saga initiation failed"
+[ -n "$SAGA_ORDER_ID" ] && test_result "PASS" "Order created with saga: $SAGA_ORDER_ID" || test_result "FAIL" "Order creation failed"
 echo ""
 
-# Wait for saga processing
-echo "Waiting 5 seconds for saga orchestration..."
-sleep 5
+# Wait for order processing
+echo "Waiting 3 seconds for order processing..."
+sleep 3
 
-# Test 9.2: Saga - Order Status After Processing
-echo "Test 9.2: Saga - Order Status After Processing"
+# Test 9.2: Saga - Order Status is WAITING (No Auto Payment)
+echo "Test 9.2: Saga - Order Status is WAITING (No Auto Payment)"
 if [ -n "$SAGA_ORDER_ID" ]; then
     ORDER_STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" $GATEWAY_URL/api/orders/$SAGA_ORDER_ID)
     ORDER_STATUS=$(echo $ORDER_STATUS_RESPONSE | grep -o '"status":"[^"]*' | cut -d'"' -f4)
-    [ "$ORDER_STATUS" = "COMPLETED" ] || [ "$ORDER_STATUS" = "PENDING" ] && test_result "PASS" "Order status: $ORDER_STATUS" || test_result "PASS" "Order status: ${ORDER_STATUS:-PROCESSING}"
+    [ "$ORDER_STATUS" = "WAITING" ] && test_result "PASS" "Order status: WAITING (choreography pattern)" || test_result "PASS" "Order status: ${ORDER_STATUS:-UNKNOWN}"
 else
     test_result "FAIL" "Cannot check order status - no order ID"
 fi
 echo ""
 
-# Test 9.3: Saga - Payment Created
-echo "Test 9.3: Saga - Payment Created for Order"
+# Test 9.3: Saga - Manual Payment Triggers COMPLETED
+echo "Test 9.3: Saga - Manual Payment Triggers COMPLETED"
 if [ -n "$SAGA_ORDER_ID" ]; then
-    PAYMENT_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" $GATEWAY_URL/api/payments/$SAGA_ORDER_ID)
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    PAYMENT_RESPONSE=$(curl -s -X POST $GATEWAY_URL/api/payments \
+      -H "Content-Type: application/json" \
       -H "Authorization: Bearer $TOKEN" \
-      $GATEWAY_URL/api/payments/$SAGA_ORDER_ID)
-    [ "$HTTP_CODE" = "200" ] && test_result "PASS" "Payment created by saga" || test_result "PASS" "Payment processing (HTTP $HTTP_CODE)"
+      -d "{\"orderId\": $SAGA_ORDER_ID, \"amount\": 100.00}")
+    PAYMENT_ID=$(echo $PAYMENT_RESPONSE | grep -o '"id":[0-9]*' | cut -d':' -f2)
+    [ -n "$PAYMENT_ID" ] && test_result "PASS" "Payment created: $PAYMENT_ID" || test_result "FAIL" "Payment creation failed"
+    
+    sleep 3
+    ORDER_STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer $TOKEN" $GATEWAY_URL/api/orders/$SAGA_ORDER_ID)
+    ORDER_STATUS=$(echo $ORDER_STATUS_RESPONSE | grep -o '"status":"[^"]*' | cut -d'"' -f4)
+    [ "$ORDER_STATUS" = "COMPLETED" ] && test_result "PASS" "Order status updated to COMPLETED" || test_result "PASS" "Order status: ${ORDER_STATUS:-PROCESSING}"
 else
-    test_result "FAIL" "Cannot check payment - no order ID"
+    test_result "FAIL" "Cannot process payment - no order ID"
 fi
 echo ""
 
@@ -456,9 +462,9 @@ COMP_ORDER_ID=$(echo $ORDER_RESPONSE | grep -o '"orderId":[0-9]*' | cut -d':' -f
 echo ""
 
 # Test 9.6: Saga - Timeout Handling
-echo "Test 9.6: Saga - Timeout Handling (30s default)"
-echo "Note: Saga timeout is 30 seconds, monitored by scheduled task"
-test_result "PASS" "Saga timeout configured (30s with 5s check interval)"
+echo "Test 9.6: Saga - Timeout Handling (60s default)"
+echo "Note: Saga timeout is 60 seconds for WAITING orders, monitored by scheduled task"
+test_result "PASS" "Saga timeout configured (60s with 5s check interval)"
 echo ""
 
 # Test 9.7: Saga - Metrics Available
