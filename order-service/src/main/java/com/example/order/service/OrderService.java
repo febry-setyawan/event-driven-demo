@@ -169,6 +169,31 @@ public class OrderService {
         }
     }
 
+    public boolean cancelOrder(Long orderId) {
+        Optional<Order> orderOpt = orderRepository.findById(orderId);
+        if (orderOpt.isEmpty()) {
+            return false;
+        }
+        
+        Order order = orderOpt.get();
+        if ("COMPLETED".equals(order.getStatus()) || "CANCELLED".equals(order.getStatus())) {
+            logger.warn("Cannot cancel order {} with status {}", orderId, order.getStatus());
+            return false;
+        }
+        
+        order.setStatus("CANCELLED");
+        orderRepository.save(order);
+        
+        Optional<SagaState> sagaOpt = sagaOrchestrator.getSagaState(orderId);
+        if (sagaOpt.isPresent()) {
+            SagaState saga = sagaOpt.get();
+            sagaOrchestrator.compensate(saga);
+        }
+        
+        logger.info("Order {} cancelled successfully", orderId);
+        return true;
+    }
+
     public OrderResponse getOrder(Long orderId) {
         Optional<Order> orderOpt = orderRepository.findById(orderId);
         if (orderOpt.isPresent()) {

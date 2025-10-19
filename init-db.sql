@@ -49,6 +49,20 @@ CREATE INDEX IF NOT EXISTS idx_saga_state_saga_id ON saga_state(saga_id);
 CREATE INDEX IF NOT EXISTS idx_saga_state_order_id ON saga_state(order_id);
 CREATE INDEX IF NOT EXISTS idx_saga_state_status ON saga_state(status);
 
+-- Create saga_events table for audit trail
+CREATE TABLE IF NOT EXISTS saga_events (
+    id BIGSERIAL PRIMARY KEY,
+    saga_id VARCHAR(36) NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    event_data TEXT,
+    status VARCHAR(20) DEFAULT 'LOGGED',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create indexes for saga_events
+CREATE INDEX IF NOT EXISTS idx_saga_events_saga_id ON saga_events(saga_id);
+CREATE INDEX IF NOT EXISTS idx_saga_events_created_at ON saga_events(created_at);
+
 -- Insert sample data for testing
 INSERT INTO orders (customer_id, product_id, quantity, amount, status) VALUES
 ('customer-001', 'product-001', 2, 99.99, 'COMPLETED'),

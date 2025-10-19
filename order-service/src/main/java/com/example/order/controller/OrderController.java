@@ -28,6 +28,17 @@ public class OrderController {
         return ResponseEntity.notFound().build();
     }
 
+    @PostMapping("/{orderId}/cancel")
+    public ResponseEntity<String> cancelOrder(@PathVariable Long orderId) {
+        logger.info("Cancelling order: {}", orderId);
+        
+        boolean cancelled = orderService.cancelOrder(orderId);
+        if (cancelled) {
+            return ResponseEntity.ok("Order cancelled successfully");
+        }
+        return ResponseEntity.notFound().build();
+    }
+
     @GetMapping("/health")
     public ResponseEntity<String> health() {
         return ResponseEntity.ok("Order Service is healthy");
