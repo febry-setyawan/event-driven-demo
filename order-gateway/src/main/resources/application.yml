@@ -6,8 +6,19 @@ spring:
     name: order-gateway
   cloud:
     gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            allowedHeaders: "*"
+            allowCredentials: true
       routes:
-
         - id: order-create-route
           uri: no://op
           predicates:
@@ -74,6 +85,18 @@ spring:
 jwt:
   secret: ${JWT_SECRET:mySecretKeyForJWTTokenGenerationMustBeLongEnough}
   expiration: 86400000
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+    urls:
+      - name: Order Service
+        url: /v3/api-docs/order-service
+      - name: Payment Service
+        url: /v3/api-docs/payment-service
 
 management:
   zipkin:
