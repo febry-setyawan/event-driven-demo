@@ -54,24 +54,53 @@ public class OrderService {
     }
 
     private void processOrderCreated(JsonNode event) {
-        Long orderId = event.get("orderId").asLong();
         String customerId = event.get("customerId").asText();
         String productId = event.get("productId").asText();
         Integer quantity = event.get("quantity").asInt();
         BigDecimal amount = new BigDecimal(event.get("amount").asText());
+        String correlationId = event.has("correlationId") ? event.get("correlationId").asText() : null;
 
-        Order order = new Order(customerId, productId, quantity, amount, "PROCESSING");
+        Order order = new Order(customerId, productId, quantity, amount, "PENDING");
         order = orderRepository.save(order);
-        Long dbOrderId = order.getId();
+        Long orderId = order.getId();
 
-        logger.info("Processing order: {} (API order_id: {})", dbOrderId, orderId);
+        logger.info("Order created with ID: {}", orderId);
 
-        sagaOrchestrator.startSaga(dbOrderId, customerId, productId, quantity, amount);
+        if (correlationId != null) {
+            publishOrderCreatedResponse(orderId, correlationId);
+        }
 
-        Optional<SagaState> sagaState = sagaOrchestrator.getSagaState(dbOrderId);
+        sagaOrchestrator.startSaga(orderId, customerId, productId, quantity, amount);
+
+        Optional<SagaState> sagaState = sagaOrchestrator.getSagaState(orderId);
         if (sagaState.isPresent()) {
             order.setStatus(sagaState.get().getStatus());
             orderRepository.save(order);
+        }
+    }
+
+    private void publishOrderCreatedResponse(Long orderId, String correlationId) {
+        try {
+            Map<String, Object> response = new HashMap<>();
+            response.put("orderId", orderId);
+            response.put("correlationId", correlationId);
+            response.put("status", "PENDING");
+
+            String responseJson = objectMapper.writeValueAsString(response);
+            org.springframework.kafka.core.KafkaTemplate<String, String> kafkaTemplate = 
+                new org.springframework.kafka.core.KafkaTemplate<>(
+                    new org.springframework.kafka.core.DefaultKafkaProducerFactory<>(
+                        Map.of(
+                            "bootstrap.servers", "kafka:29092",
+                            "key.serializer", "org.apache.kafka.common.serialization.StringSerializer",
+                            "value.serializer", "org.apache.kafka.common.serialization.StringSerializer"
+                        )
+                    )
+                );
+            kafkaTemplate.send("order-response", correlationId, responseJson);
+            logger.info("Published order response for orderId: {}", orderId);
+        } catch (Exception e) {
+            logger.error("Failed to publish order response", e);
         }
     }
 
@@ -79,7 +108,7 @@ public class OrderService {
         Optional<Order> orderOpt = orderRepository.findById(orderId);
         if (orderOpt.isPresent()) {
             Order order = orderOpt.get();
-            Optional<SagaState> sagaState = sagaOrchestrator.getSagaState(orderId);
+            Optional<SagaState> sagaState = sagaOrchestrator.getSagaState(order.getId());
             if (sagaState.isPresent()) {
                 order.setStatus(sagaState.get().getStatus());
                 orderRepository.save(order);

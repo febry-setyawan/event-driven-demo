@@ -25,7 +25,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @Component
 public class OrderValidationFilter extends AbstractGatewayFilterFactory<OrderValidationFilter.Config> {
     private static final Logger logger = LoggerFactory.getLogger(OrderValidationFilter.class);
-    private final AtomicLong orderIdGenerator = new AtomicLong(1);
+
 
     @Autowired
     private Validator validator;
@@ -66,12 +66,19 @@ public class OrderValidationFilter extends AbstractGatewayFilterFactory<OrderVal
                                 return exchange.getResponse().writeWith(Mono.just(buffer));
                             }
                             
-                            Long orderId = orderIdGenerator.getAndIncrement();
-                            orderEventService.publishOrderCreated(orderId, orderRequest);
+                            String correlationId = java.util.UUID.randomUUID().toString();
+                            orderEventService.publishOrderCreatedAndWait(orderRequest, correlationId);
                             
-                            String response = String.format("{\"orderId\":%d,\"customerId\":\"%s\",\"productId\":\"%s\",\"quantity\":%d,\"amount\":%.2f,\"status\":\"PENDING\"}",
-                                orderId, orderRequest.getCustomerId(), orderRequest.getProductId(), 
-                                orderRequest.getQuantity(), orderRequest.getAmount());
+                            Long orderId = waitForOrderResponse(correlationId);
+                            
+                            String response;
+                            if (orderId != null) {
+                                response = String.format("{\"orderId\":%d,\"customerId\":\"%s\",\"productId\":\"%s\",\"quantity\":%d,\"amount\":%.2f,\"status\":\"PENDING\"}",
+                                    orderId, orderRequest.getCustomerId(), orderRequest.getProductId(), 
+                                    orderRequest.getQuantity(), orderRequest.getAmount());
+                            } else {
+                                response = "{\"status\":\"PENDING\",\"message\":\"Order is being processed\"}";
+                            }
                             
                             exchange.getResponse().setStatusCode(HttpStatus.OK);
                             exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
@@ -89,6 +96,39 @@ public class OrderValidationFilter extends AbstractGatewayFilterFactory<OrderVal
             
             return chain.filter(exchange);
         };
+    }
+
+    private final java.util.concurrent.ConcurrentHashMap<String, Long> pendingOrders = new java.util.concurrent.ConcurrentHashMap<>();
+
+    @org.springframework.kafka.annotation.KafkaListener(topics = "order-response", groupId = "gateway-group")
+    public void handleOrderResponse(String message) {
+        try {
+            com.fasterxml.jackson.databind.JsonNode response = objectMapper.readTree(message);
+            String correlationId = response.get("correlationId").asText();
+            Long orderId = response.get("orderId").asLong();
+            pendingOrders.put(correlationId, orderId);
+            logger.info("Received order response: orderId={}, correlationId={}", orderId, correlationId);
+        } catch (Exception e) {
+            logger.error("Error processing order response", e);
+        }
+    }
+
+    private Long waitForOrderResponse(String correlationId) {
+        int attempts = 0;
+        while (attempts < 20) {
+            Long orderId = pendingOrders.remove(correlationId);
+            if (orderId != null) {
+                return orderId;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            attempts++;
+        }
+        return null;
     }
 
     public static class Config {

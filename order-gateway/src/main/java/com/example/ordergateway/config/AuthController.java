@@ -4,6 +4,8 @@ import com.example.ordergateway.dto.AuthRequest;
 import com.example.ordergateway.dto.AuthResponse;
 import com.example.ordergateway.security.JwtUtil;
 import com.example.ordergateway.service.TokenService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +17,7 @@ import reactor.core.publisher.Mono;
 
 @RestController
 @RequestMapping("/api/auth")
+@Tag(name = "Authentication", description = "Authentication endpoints")
 public class AuthController {
     private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
 
@@ -27,6 +30,7 @@ public class AuthController {
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @PostMapping("/login")
+    @Operation(summary = "Login", description = "Authenticate and get JWT token")
     public Mono<ResponseEntity<AuthResponse>> login(@RequestBody AuthRequest request) {
         logger.info("Login attempt for user: {}", request.getUsername());
         

@@ -25,24 +25,26 @@ public class OrderEventService {
     @Autowired
     private ObjectMapper objectMapper;
 
-    public void publishOrderCreated(Long orderId, OrderRequest request) {
+    public Long publishOrderCreatedAndWait(OrderRequest request, String correlationId) {
         try {
             Map<String, Object> event = new HashMap<>();
             event.put("eventType", "OrderCreated");
-            event.put("orderId", orderId);
             event.put("customerId", request.getCustomerId());
             event.put("productId", request.getProductId());
             event.put("quantity", request.getQuantity());
             event.put("amount", request.getAmount());
+            event.put("correlationId", correlationId);
             event.put("timestamp", Instant.now().toString());
 
             String eventJson = objectMapper.writeValueAsString(event);
+            kafkaTemplate.send(ORDER_EVENTS_TOPIC, request.getCustomerId(), eventJson).get();
+            logger.info("Published OrderCreated event with correlationId: {}", correlationId);
             
-            kafkaTemplate.send(ORDER_EVENTS_TOPIC, orderId.toString(), eventJson);
-            logger.info("Published OrderCreated event for order: {}", orderId);
-            
-        } catch (JsonProcessingException e) {
-            logger.error("Error serializing order event", e);
+            Thread.sleep(500);
+            return null;
+        } catch (Exception e) {
+            logger.error("Error publishing order event", e);
+            return null;
         }
     }
 }

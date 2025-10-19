@@ -52,7 +52,7 @@ public class SagaOrchestrator {
         logger.info("Saga state saved for order: {}", orderId);
 
         try {
-            processPaymentStep(saga, orderId, amount);
+            processPaymentStep(orderId, amount);
         } catch (Exception e) {
             logger.error("Error in saga execution for order: {}, initiating compensation", orderId, e);
             compensate(saga);
@@ -60,7 +60,8 @@ public class SagaOrchestrator {
     }
 
     @CircuitBreaker(name = "paymentService", fallbackMethod = "paymentServiceFallback")
-    private void processPaymentStep(SagaState saga, Long orderId, BigDecimal amount) throws JsonProcessingException {
+    private void processPaymentStep(Long orderId, BigDecimal amount) throws JsonProcessingException {
+        SagaState saga = sagaStateRepository.findByOrderId(orderId).orElseThrow();
         saga.setCurrentStep("PAYMENT_PENDING");
         saga.setStatus("PROCESSING");
         saga = sagaStateRepository.save(saga);
@@ -68,7 +69,7 @@ public class SagaOrchestrator {
 
         PaymentRequest paymentRequest = new PaymentRequest(orderId, amount);
         String response = webClient.post()
-                .uri(paymentServiceUrl + "/payments")
+                .uri(paymentServiceUrl + "/api/payments")
                 .bodyValue(paymentRequest)
                 .retrieve()
                 .bodyToMono(String.class)
@@ -85,9 +86,12 @@ public class SagaOrchestrator {
         logger.info("Saga completed successfully for order: {}", orderId);
     }
 
-    private void paymentServiceFallback(SagaState saga, Long orderId, BigDecimal amount, Exception ex) {
+    private void paymentServiceFallback(Long orderId, BigDecimal amount, Exception ex) {
         logger.error("Circuit breaker triggered for order: {}, initiating compensation", orderId);
-        compensate(saga);
+        SagaState saga = sagaStateRepository.findByOrderId(orderId).orElse(null);
+        if (saga != null) {
+            compensate(saga);
+        }
     }
 
     private void compensate(SagaState saga) {
@@ -112,7 +116,7 @@ public class SagaOrchestrator {
     private void cancelPayment(Long paymentId) {
         try {
             webClient.post()
-                    .uri(paymentServiceUrl + "/payments/" + paymentId + "/cancel")
+                    .uri(paymentServiceUrl + "/api/payments/" + paymentId + "/cancel")
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
