@@ -175,8 +175,9 @@ public class SagaOrchestrator {
         logger.info("Checking for in-progress sagas to recover...");
         sagaStateRepository.findAll().stream()
             .filter(saga -> "PROCESSING".equals(saga.getStatus()) || "STARTED".equals(saga.getStatus()))
+            .filter(saga -> saga.getCreatedAt().isBefore(java.time.LocalDateTime.now().minusMinutes(1)))
             .forEach(saga -> {
-                logger.info("Recovering saga for order: {} with status: {}", saga.getOrderId(), saga.getStatus());
+                logger.info("Recovering saga for order: {} with status: {}, created at: {}", saga.getOrderId(), saga.getStatus(), saga.getCreatedAt());
                 compensate(saga);
             });
     }

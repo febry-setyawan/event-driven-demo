@@ -105,10 +105,13 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,gateway,routes
+        include: health,info,metrics,prometheus,gateway,routes,circuitbreakers,circuitbreakerevents
   endpoint:
     health:
       show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
   tracing:
     sampling:
       probability: 1.0

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS orders (
 -- Create payments table
 CREATE TABLE IF NOT EXISTS payments (
     id BIGSERIAL PRIMARY KEY,
-    order_id BIGINT REFERENCES orders(id),
+    order_id BIGINT NOT NULL,
     amount DECIMAL(10,2) NOT NULL,
     status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
