@@ -1,6 +1,82 @@
 # Release Notes
 
-## v1.4 - Spring Cloud Gateway Implementation (Current)
+## v1.4.2 - Grafana Dashboard Persistence & Saga Fixes (Current)
+
+**Release Date:** 2025-10-19
+
+### Critical Fixes
+- **Grafana Dashboard Persistence**: Dashboards now persist after container restart
+  - Fixed provisioning path configuration
+  - Separated datasources and dashboards volume mounts
+  - Set allowUiUpdates to false to prevent non-persistent changes
+  - Both dashboards auto-load: Event-Driven Architecture Metrics, Saga Pattern Monitoring
+
+- **Kafka Metrics Export**: Kafka producer metrics now visible in dashboard
+  - Added micrometer-registry-prometheus dependency to order-gateway
+  - Updated Grafana Agent to scrape order-gateway instead of deprecated api-gateway
+  - Metrics exported from order-gateway and order-service
+
+- **Dashboard Query Aggregation**: Removed duplicate metrics
+  - HTTP Response Time: 3 services instead of 9 lines
+  - JVM Memory Usage: 3 services instead of 9 lines
+  - Aggregated queries by application label using sum() by (application)
+  - Changed JVM memory query to use committed_bytes instead of max_bytes
+
+- **Saga Pattern Failures**: Sagas now complete successfully
+  - Removed foreign key constraint on payments.order_id
+  - Added 1-minute grace period in saga recovery
+  - Recovery only compensates sagas older than 1 minute
+  - Payment-service now operates independently
+
+- **Circuit Breaker Actuator**: Circuit breaker state now visible
+  - Enabled circuitbreakers and circuitbreakerevents actuator endpoints
+  - State shows CLOSED for orderService and paymentService
+
+- **Test Suite**: 100% pass rate (43/43 tests)
+  - Fixed test 10.1 expectation for long customer ID
+  - All critical flows verified
+
+### Technical Changes
+- Database: Removed FK constraint payments.order_id REFERENCES orders(id)
+- Monitoring: Updated Grafana Agent scrape target from api-gateway to order-gateway
+- Configuration: Enabled circuit breaker actuator endpoints in order-gateway
+- Code: Added createdAt filter in SagaOrchestrator.recoverSagas()
+
+### Testing Results
+- Total Tests: 43, Passed: 43, Failed: 0, Success Rate: 100%
+
+---
+
+## v1.4.1 - Swagger UI Order Endpoint Fix
+
+**Release Date:** 2025-10-19
+
+### Fixed
+- **Swagger UI POST /api/orders Endpoint**: Fixed NullPointerException and orderId response
+  - Implemented order-response Kafka topic for orderId communication
+  - Added correlationId-based request-response pattern
+  - Order-gateway now waits for orderId from order-service before returning response
+  - Fixed payment service URL paths in order-service configuration
+
+### Implementation
+- **New Kafka Topic**: order-response (1 partition, 1 hour retention)
+- **OrderValidationFilter**: Kafka consumer to receive orderId from order-service
+- **CorrelationId Pattern**: UUID-based correlation for async request-response
+- **Order Creation Flow**:
+  1. Order-gateway publishes OrderCreated event with correlationId
+  2. Order-service persists order and publishes response with orderId
+  3. Order-gateway consumes response and returns orderId to client
+  4. Synchronous API behavior with async messaging underneath
+
+### Technical Changes
+- Added order-response topic with 1 partition
+- Timeout: 5-second wait for order-service response
+- Fallback: Returns orderId=null if timeout occurs
+- Configuration: PAYMENT_SERVICE_URL environment variable for order-service
+
+---
+
+## v1.4 - Spring Cloud Gateway Implementation
 
 **Release Date:** 2025-10-17
 
