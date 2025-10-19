@@ -42,7 +42,7 @@ public class SagaState {
         this.orderId = orderId;
         this.status = status;
         this.currentStep = currentStep;
-        this.timeoutAt = LocalDateTime.now().plusSeconds(30);
+        this.timeoutAt = LocalDateTime.now().plusSeconds(60);
     }
 
     public Long getId() { return id; }
