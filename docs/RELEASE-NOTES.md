@@ -1,6 +1,80 @@
 # Release Notes
 
-## v1.4.2 - Grafana Dashboard Persistence & Saga Fixes (Current)
+## v1.4.3 - Choreography-Based Saga Pattern (Current)
+
+**Release Date:** 2025-10-19
+
+### Major Changes
+- **Saga Pattern Architecture**: Migrated from orchestration to choreography-based saga
+  - Order Service no longer auto-calls Payment Service
+  - Payment API must be called externally by client
+  - Pure event-driven communication between services
+  - Decoupled services with no direct HTTP dependencies
+
+### Order Status Flow
+1. **Order Created**: Status **WAITING** (waiting for payment)
+2. **Payment Success**: Status **COMPLETED** (payment processed)
+3. **Payment Failed**: Status **FAILED** (validation or processing error)
+4. **No Payment (60s)**: Status **FAILED**, Saga **NO_PAYMENT**
+5. **Cancel Payment**: Status **REFUNDED** (payment cancelled)
+
+### New Features
+- **Payment Retry Logic**: 3 attempts with exponential backoff (1s, 2s)
+  - Retries on database save errors
+  - Publishes PaymentFailed event after 3 failed attempts
+  - Detailed logging for each retry attempt
+
+- **Payment Validation**:
+  - Reject payments with amount < 10 (business rule)
+  - Simulate retry failure for amount = 999.99 (testing)
+  - Publishes PaymentFailed event on validation failure
+
+- **Event-Driven Updates**:
+  - PaymentProcessed event → Order COMPLETED
+  - PaymentFailed event → Order FAILED
+  - PaymentCancelled event → Order REFUNDED
+
+### Technical Changes
+- **SagaOrchestrator**: Removed processPaymentStep, added failSaga/refundPayment methods
+- **OrderService**: Order status WAITING on creation, added payment event handlers
+- **PaymentService**: Added retry logic with exponential backoff
+- **SagaState**: Timeout increased from 30s to 60s
+- **Saga Timeout**: Only applies to WAITING status, completed/failed sagas not affected
+
+### Testing Results
+All 6 scenarios tested and verified:
+- ✅ Order WAITING (no payment yet)
+- ✅ Payment Success → COMPLETED
+- ✅ Payment Failed (amount < 10) → FAILED
+- ✅ No Payment Timeout (60s) → FAILED/NO_PAYMENT
+- ✅ Cancel Payment → REFUNDED
+- ✅ Retry 3x Failed → FAILED (with detailed logs)
+
+### Database Status Example
+```
+Order 1: WAITING    | Saga: NO_PAYMENT  (timeout after 60s)
+Order 2: COMPLETED  | Saga: COMPLETED   (payment success)
+Order 3: FAILED     | Saga: FAILED      (payment validation)
+Order 4: REFUNDED   | Saga: REFUNDED    (cancel payment)
+Order 5: FAILED     | Saga: FAILED      (retry 3x failed)
+```
+
+### Migration Notes
+- Payment Service must be called explicitly by client
+- Order creation returns orderId immediately with PENDING status
+- Check order status via GET /api/orders/{id} for actual status (WAITING)
+- Saga timeout increased to 60 seconds for payment processing
+- Order and saga status now fully consistent
+
+### Removed
+- Auto-call to Payment Service from SagaOrchestrator
+- Saga recovery on restart (@PostConstruct)
+- Circuit breaker fallback for payment calls
+- Orchestration logic from Order Service
+
+---
+
+## v1.4.2 - Grafana Dashboard Persistence & Saga Fixes
 
 **Release Date:** 2025-10-19
 

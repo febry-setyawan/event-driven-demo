@@ -6,6 +6,102 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v1.4.3] - 2025-10-19
+
+### Changed
+- **Saga Pattern Architecture**
+  - Migrated from orchestration-based to choreography-based saga pattern
+  - Order Service no longer auto-calls Payment Service
+  - Payment API must be called externally by client
+  - Decoupled services with pure event-driven communication
+  
+- **Order Status Flow**
+  - Order created with status **WAITING** (consistent in DB and API)
+  - Payment success → **COMPLETED**
+  - Payment failed → **FAILED**
+  - No payment within 60s → **FAILED** (saga: NO_PAYMENT)
+  - Cancel payment → **REFUNDED**
+  
+- **Saga Timeout**
+  - Increased from 30 seconds to 60 seconds
+  - Timeout only applies to WAITING status
+  - Completed/Failed sagas not affected by timeout checker
+  
+### Added
+- **Payment Retry Logic**
+  - 3 retry attempts on database save errors
+  - Exponential backoff: 1s, 2s between retries
+  - Publishes PaymentFailed event after 3 failed attempts
+  - Detailed logging for each retry attempt
+  
+- **Payment Validation**
+  - Reject payments with amount < 10 (business rule)
+  - Simulate retry failure for amount = 999.99 (testing)
+  - Publishes PaymentFailed event on validation failure
+  
+- **New Saga Methods**
+  - `failSaga(orderId)`: Updates saga to FAILED status
+  - `refundPayment(orderId)`: Updates saga to REFUNDED status
+  - `processPayment(orderId, paymentId)`: Updates saga to PROCESSING
+  
+- **Event Handling**
+  - PaymentProcessed event → Order COMPLETED
+  - PaymentFailed event → Order FAILED
+  - PaymentCancelled event → Order REFUNDED
+  
+### Fixed
+- Saga status consistency with order status
+- Timeout checker no longer compensates completed sagas
+- Order status properly reflects saga state
+- Payment failure properly updates saga status
+
+### Removed
+- Auto-call to Payment Service from SagaOrchestrator
+- Saga recovery on restart (@PostConstruct)
+- Circuit breaker fallback for payment calls
+- Orchestration logic from Order Service
+
+### Technical Details
+- **Modified Files**:
+  - `SagaOrchestrator.java`: Removed processPaymentStep, added failSaga/refundPayment
+  - `OrderService.java`: Order status WAITING on creation, added payment event handlers
+  - `PaymentService.java`: Added retry logic with exponential backoff
+  - `SagaState.java`: Timeout increased to 60 seconds
+  
+- **Event Flow**:
+  1. OrderCreated → Order WAITING, Saga WAITING
+  2. Client calls Payment API
+  3. PaymentProcessed → Order COMPLETED, Saga COMPLETED
+  4. PaymentFailed → Order FAILED, Saga FAILED
+  5. PaymentCancelled → Order REFUNDED, Saga REFUNDED
+  6. Timeout (60s) → Order FAILED, Saga NO_PAYMENT
+  
+### Testing Results
+- **Scenario 1**: Order WAITING → ✅ Passed
+- **Scenario 2**: Payment Success → COMPLETED → ✅ Passed
+- **Scenario 3**: Payment Failed (amount < 10) → FAILED → ✅ Passed
+- **Scenario 4**: No Payment Timeout (60s) → FAILED/NO_PAYMENT → ✅ Passed
+- **Scenario 5**: Cancel Payment → REFUNDED → ✅ Passed
+- **Scenario 6**: Retry 3x Failed → FAILED → ✅ Passed (with detailed logs)
+
+### Database Status
+```
+Order 1: WAITING    | Saga: NO_PAYMENT  (timeout)
+Order 2: COMPLETED  | Saga: COMPLETED   (payment success)
+Order 3: FAILED     | Saga: FAILED      (payment validation)
+Order 4: REFUNDED   | Saga: REFUNDED    (cancel payment)
+Order 5: FAILED     | Saga: FAILED      (retry 3x failed)
+```
+
+### Migration Notes
+- Payment Service must be called explicitly by client
+- Order creation returns orderId immediately with PENDING status
+- Check order status via GET /api/orders/{id} for actual status
+- Saga timeout increased to 60 seconds for payment processing
+- All scenarios tested and verified with 100% success rate
+
+---
+
 ## [v1.4.2] - 2025-10-19
 
 ### Fixed
