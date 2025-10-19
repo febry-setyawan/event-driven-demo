@@ -130,44 +130,51 @@ This POC demonstrates a complete Event-Driven Architecture using Spring Boot mic
 docker-compose down -v
 ```
 
-## Event Flow
+## Event Flow (Choreography-Based Saga)
 
-### Happy Path (Successful Order)
+### Scenario 1: Order Created (Waiting for Payment)
 1. **Order Gateway** receives HTTP POST request to create order
 2. **Order Gateway** validates request with Bean Validation
-3. **Order Gateway** generates correlationId and publishes `OrderCreated` event to **order-events** Kafka topic
-4. **Order Service** consumes the event and persists order to PostgreSQL (generates orderId)
-5. **Order Service** publishes order response with orderId to **order-response** topic
-6. **Order Gateway** receives order response and returns orderId to client
-7. **Order Service** creates saga state (STARTED → PROCESSING)
-8. **Order Service** calls **Payment Service** via HTTP with circuit breaker
-9. **Payment Service** checks for existing payment (idempotency)
-10. **Payment Service** persists payment to PostgreSQL
-11. **Payment Service** publishes `PaymentProcessed` event to **payment-events** topic
-12. **Order Service** updates saga state to COMPLETED
-13. **Order Service** updates order status to COMPLETED
+3. **Order Gateway** publishes `OrderCreated` event to **order-events** Kafka topic
+4. **Order Service** consumes event and persists order with status **WAITING**
+5. **Order Service** creates saga state with status **WAITING**
+6. **Order Service** publishes order response to **order-response** topic
+7. **Order Gateway** returns orderId to client
+8. Order waits for external payment request (no auto-call to Payment Service)
 
-### Compensation Flow (Failed Payment)
-1. **Payment Service** is unavailable or returns error
-2. **Circuit Breaker** opens after failure threshold
-3. **Order Service** saga orchestrator detects failure
-4. **Order Service** updates saga state to COMPENSATING
-5. **Order Service** cancels payment (if created) via Payment Service
-6. **Payment Service** publishes `PaymentCancelled` event to **compensation-events** topic
-7. **Order Service** publishes `OrderCancelled` event to **compensation-events** topic
-8. **Order Service** updates saga state to FAILED with step COMPENSATED
-9. **Order Service** updates order status to FAILED
+### Scenario 2: Payment Success
+1. Client calls **Payment Service** API with orderId and amount
+2. **Payment Service** validates and processes payment (with 3x retry on errors)
+3. **Payment Service** persists payment to PostgreSQL
+4. **Payment Service** publishes `PaymentProcessed` event to **payment-events** topic
+5. **Order Service** consumes event and updates saga to **PROCESSING** → **COMPLETED**
+6. **Order Service** updates order status to **COMPLETED**
 
-### Saga Timeout Handling
-1. **Scheduled task** checks for expired sagas every 5 seconds
-2. Sagas exceeding 30-second timeout are detected
-3. **Compensation flow** triggered automatically for timed-out sagas
+### Scenario 3: Payment Failed
+1. Client calls **Payment Service** API
+2. **Payment Service** fails validation or processing (e.g., amount < 10)
+3. **Payment Service** publishes `PaymentFailed` event to **payment-events** topic
+4. **Order Service** consumes event and updates saga to **FAILED**
+5. **Order Service** updates order status to **FAILED**
 
-### Saga Recovery on Restart
-1. **Order Service** starts up and runs @PostConstruct recovery method
-2. Queries all sagas with status PROCESSING or STARTED
-3. **Compensation flow** triggered for in-progress sagas
-4. Ensures no lost transactions after service restart
+### Scenario 4: No Payment (Timeout)
+1. Order created but no payment received within 60 seconds
+2. **Scheduled task** checks for expired sagas every 5 seconds
+3. Saga status updated from **WAITING** to **NO_PAYMENT**
+4. Order status updated to **FAILED**
+
+### Scenario 5: Cancel Payment (Refund)
+1. Client calls cancel payment API (within 24 hours)
+2. **Payment Service** updates payment status to **CANCELLED**
+3. **Payment Service** publishes `PaymentCancelled` event to **payment-events** topic
+4. **Order Service** consumes event and updates saga to **REFUNDED**
+5. **Order Service** updates order status to **REFUNDED**
+
+### Scenario 6: Payment Retry on Internal Error
+1. **Payment Service** encounters database error during save
+2. Retry logic attempts save 3 times with exponential backoff (1s, 2s)
+3. If all retries fail, publishes `PaymentFailed` event
+4. Order status updated to **FAILED**
 
 ### Observability
 - All services emit logs, metrics, and traces to **Grafana Agent**
@@ -403,9 +410,9 @@ ab -n 1000 -c 10 -H "Content-Type: application/json" \
 | **Distributed Tracing** | ✅ | End-to-end request tracking across all services |
 | **Structured Logging** | ✅ | Parameterized logs with trace IDs for correlation |
 | **Health Checks** | ✅ | Actuator endpoints with Docker healthcheck integration |
-| **Saga Pattern** | ✅ | Orchestration-based saga for distributed transactions |
-| **Saga Timeout Handling** | ✅ | Automatic compensation for timed-out sagas (30s default) |
-| **Saga Recovery** | ✅ | Automatic recovery of in-progress sagas on service restart |
+| **Saga Pattern** | ✅ | Choreography-based saga for distributed transactions |
+| **Saga Timeout Handling** | ✅ | Automatic timeout detection for unpaid orders (60s default) |
+| **Payment Retry** | ✅ | 3x retry with exponential backoff on internal errors |
 | **Saga Monitoring** | ✅ | Real-time Grafana dashboard with metrics and visualization |
 | **API Rate Limiting** | ✅ | Spring Cloud Gateway rate limiting with Redis (5 req/sec, burst 10) |
 | **Swagger Documentation** | ✅ | Aggregated OpenAPI docs from all services via Nginx reverse proxy |

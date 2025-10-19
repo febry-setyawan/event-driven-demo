@@ -53,6 +53,75 @@ public class OrderService {
         }
     }
 
+    @KafkaListener(topics = "payment-events", groupId = "order-service-group")
+    public void handlePaymentEvent(String message) {
+        try {
+            logger.info("Received payment event: {}", message);
+            
+            JsonNode event = objectMapper.readTree(message);
+            String eventType = event.get("eventType").asText();
+            
+            if ("PaymentProcessed".equals(eventType)) {
+                processPaymentSuccess(event);
+            } else if ("PaymentFailed".equals(eventType)) {
+                processPaymentFailure(event);
+            } else if ("PaymentCancelled".equals(eventType)) {
+                processPaymentCancelled(event);
+            }
+            
+        } catch (Exception e) {
+            logger.error("Error processing payment event: {}", message, e);
+            sendToDeadLetterQueue(message, "PaymentEventException", e.getMessage());
+        }
+    }
+
+    private void processPaymentSuccess(JsonNode event) {
+        Long orderId = event.get("orderId").asLong();
+        Long paymentId = event.get("paymentId").asLong();
+        logger.info("Payment successful for order: {}, payment: {}", orderId, paymentId);
+        
+        sagaOrchestrator.processPayment(orderId, paymentId);
+        sagaOrchestrator.completeSaga(orderId);
+        
+        Optional<Order> orderOpt = orderRepository.findById(orderId);
+        if (orderOpt.isPresent()) {
+            Order order = orderOpt.get();
+            order.setStatus("COMPLETED");
+            orderRepository.save(order);
+            logger.info("Order {} status updated to COMPLETED", orderId);
+        }
+    }
+
+    private void processPaymentFailure(JsonNode event) {
+        Long orderId = event.get("orderId").asLong();
+        logger.error("Payment failed for order: {}", orderId);
+        
+        sagaOrchestrator.failSaga(orderId);
+        
+        Optional<Order> orderOpt = orderRepository.findById(orderId);
+        if (orderOpt.isPresent()) {
+            Order order = orderOpt.get();
+            order.setStatus("FAILED");
+            orderRepository.save(order);
+            logger.info("Order {} status updated to FAILED", orderId);
+        }
+    }
+
+    private void processPaymentCancelled(JsonNode event) {
+        Long orderId = event.get("orderId").asLong();
+        logger.info("Payment cancelled for order: {}", orderId);
+        
+        sagaOrchestrator.refundPayment(orderId);
+        
+        Optional<Order> orderOpt = orderRepository.findById(orderId);
+        if (orderOpt.isPresent()) {
+            Order order = orderOpt.get();
+            order.setStatus("REFUNDED");
+            orderRepository.save(order);
+            logger.info("Order {} status updated to REFUNDED", orderId);
+        }
+    }
+
     private void processOrderCreated(JsonNode event) {
         String customerId = event.get("customerId").asText();
         String productId = event.get("productId").asText();
@@ -60,23 +129,17 @@ public class OrderService {
         BigDecimal amount = new BigDecimal(event.get("amount").asText());
         String correlationId = event.has("correlationId") ? event.get("correlationId").asText() : null;
 
-        Order order = new Order(customerId, productId, quantity, amount, "PENDING");
+        Order order = new Order(customerId, productId, quantity, amount, "WAITING");
         order = orderRepository.save(order);
         Long orderId = order.getId();
 
-        logger.info("Order created with ID: {}", orderId);
+        logger.info("Order created with ID: {} with status WAITING", orderId);
 
         if (correlationId != null) {
             publishOrderCreatedResponse(orderId, correlationId);
         }
 
         sagaOrchestrator.startSaga(orderId, customerId, productId, quantity, amount);
-
-        Optional<SagaState> sagaState = sagaOrchestrator.getSagaState(orderId);
-        if (sagaState.isPresent()) {
-            order.setStatus(sagaState.get().getStatus());
-            orderRepository.save(order);
-        }
     }
 
     private void publishOrderCreatedResponse(Long orderId, String correlationId) {
@@ -110,8 +173,11 @@ public class OrderService {
             Order order = orderOpt.get();
             Optional<SagaState> sagaState = sagaOrchestrator.getSagaState(order.getId());
             if (sagaState.isPresent()) {
-                order.setStatus(sagaState.get().getStatus());
-                orderRepository.save(order);
+                String sagaStatus = sagaState.get().getStatus();
+                if ("NO_PAYMENT".equals(sagaStatus)) {
+                    order.setStatus("FAILED");
+                    orderRepository.save(order);
+                }
             }
             return new OrderResponse(order.getId(), order.getCustomerId(), order.getProductId(), 
                 order.getQuantity(), order.getAmount(), order.getStatus());
