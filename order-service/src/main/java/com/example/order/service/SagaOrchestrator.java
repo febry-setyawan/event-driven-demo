@@ -1,7 +1,9 @@
 package com.example.order.service;
 
 import com.example.order.dto.PaymentRequest;
+import com.example.order.entity.SagaEvent;
 import com.example.order.entity.SagaState;
+import com.example.order.repository.SagaEventRepository;
 import com.example.order.repository.SagaStateRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -23,6 +25,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class SagaOrchestrator {
@@ -32,6 +35,9 @@ public class SagaOrchestrator {
 
     @Autowired
     private SagaStateRepository sagaStateRepository;
+
+    @Autowired
+    private SagaEventRepository sagaEventRepository;
 
     @Autowired
     private KafkaTemplate<String, String> kafkaTemplate;
@@ -44,12 +50,21 @@ public class SagaOrchestrator {
 
     private final WebClient webClient = WebClient.builder().build();
 
-    public void startSaga(Long orderId, String customerId, String productId, Integer quantity, BigDecimal amount) {
-        logger.info("Starting saga for order: {}", orderId);
+    public String startSaga(Long orderId, String customerId, String productId, Integer quantity, BigDecimal amount) {
+        String sagaId = UUID.randomUUID().toString();
+        return startSagaWithId(sagaId, orderId, customerId, productId, quantity, amount);
+    }
 
-        SagaState saga = new SagaState(orderId, "WAITING", "ORDER_CREATED");
+    public String startSagaWithId(String sagaId, Long orderId, String customerId, String productId, Integer quantity, BigDecimal amount) {
+        logger.info("Starting saga {} for order: {}", sagaId, orderId);
+
+        SagaState saga = new SagaState(sagaId, orderId, "WAITING", "ORDER_CREATED");
         saga = sagaStateRepository.save(saga);
-        logger.info("Saga state saved for order: {} with status WAITING", orderId);
+        
+        logSagaEvent(sagaId, "SAGA_STARTED", String.format("Order: %d, Customer: %s, Amount: %s", orderId, customerId, amount));
+        
+        logger.info("Saga {} state saved for order: {} with status WAITING", sagaId, orderId);
+        return sagaId;
     }
 
     public void processPayment(Long orderId, Long paymentId) {
@@ -58,24 +73,33 @@ public class SagaOrchestrator {
         saga.setCurrentStep("PAYMENT_PROCESSING");
         saga.setPaymentId(paymentId);
         sagaStateRepository.save(saga);
+        
+        logSagaEvent(saga.getSagaId(), "PAYMENT_PROCESSING", String.format("Payment ID: %d", paymentId));
+        
         logger.info("Payment processing started for order: {}, payment: {}", orderId, paymentId);
     }
 
     public void compensate(SagaState saga) {
         saga.setStatus("COMPENSATING");
         sagaStateRepository.save(saga);
+        
+        logSagaEvent(saga.getSagaId(), "COMPENSATION_STARTED", "Starting compensation for order: " + saga.getOrderId());
 
         logger.info("Starting compensation for order: {}", saga.getOrderId());
 
         if (saga.getPaymentId() != null) {
             cancelPayment(saga.getPaymentId());
+            logSagaEvent(saga.getSagaId(), "PAYMENT_CANCELLED", "Payment ID: " + saga.getPaymentId());
         }
 
         cancelOrder(saga.getOrderId());
+        logSagaEvent(saga.getSagaId(), "ORDER_CANCELLED", "Order ID: " + saga.getOrderId());
 
         saga.setStatus("FAILED");
         saga.setCurrentStep("COMPENSATED");
         sagaStateRepository.save(saga);
+        
+        logSagaEvent(saga.getSagaId(), "COMPENSATION_COMPLETED", "All compensations executed");
 
         logger.info("Compensation completed for order: {}", saga.getOrderId());
     }
@@ -85,6 +109,9 @@ public class SagaOrchestrator {
         saga.setStatus("COMPLETED");
         saga.setCurrentStep("PAYMENT_COMPLETED");
         sagaStateRepository.save(saga);
+        
+        logSagaEvent(saga.getSagaId(), "SAGA_COMPLETED", "Payment completed successfully");
+        
         logger.info("Saga completed successfully for order: {}", orderId);
     }
 
@@ -113,17 +140,29 @@ public class SagaOrchestrator {
         }
     }
 
+    private void logSagaEvent(String sagaId, String eventType, String eventData) {
+        try {
+            SagaEvent event = new SagaEvent(sagaId, eventType, eventData);
+            sagaEventRepository.save(event);
+            logger.debug("Logged saga event: {} for saga: {}", eventType, sagaId);
+        } catch (Exception e) {
+            logger.error("Failed to log saga event: {} for saga: {}", eventType, sagaId, e);
+        }
+    }
+
     private void publishCompensationEvent(String eventType, Long entityId) {
         try {
+            String idempotencyKey = UUID.randomUUID().toString();
             Map<String, Object> event = new HashMap<>();
             event.put("eventType", eventType);
             event.put("entityId", entityId);
+            event.put("idempotencyKey", idempotencyKey);
             event.put("timestamp", Instant.now().toString());
 
             String eventJson = objectMapper.writeValueAsString(event);
             kafkaTemplate.send(COMPENSATION_TOPIC, entityId.toString(), eventJson);
 
-            logger.info("Published {} event for entity: {}", eventType, entityId);
+            logger.info("Published {} event for entity: {} with idempotencyKey: {}", eventType, entityId, idempotencyKey);
 
         } catch (JsonProcessingException e) {
             logger.error("Error publishing compensation event", e);
@@ -145,6 +184,8 @@ public class SagaOrchestrator {
                 saga.setStatus("NO_PAYMENT");
                 saga.setCurrentStep("TIMEOUT");
                 sagaStateRepository.save(saga);
+                
+                logSagaEvent(saga.getSagaId(), "SAGA_TIMEOUT", "No payment received within timeout period");
             });
     }
 
@@ -153,6 +194,9 @@ public class SagaOrchestrator {
         saga.setStatus("REFUNDED");
         saga.setCurrentStep("PAYMENT_REFUNDED");
         sagaStateRepository.save(saga);
+        
+        logSagaEvent(saga.getSagaId(), "PAYMENT_REFUNDED", "Payment cancelled and refunded");
+        
         logger.info("Payment refunded for order: {}", orderId);
     }
 
@@ -161,6 +205,9 @@ public class SagaOrchestrator {
         saga.setStatus("FAILED");
         saga.setCurrentStep("PAYMENT_FAILED");
         sagaStateRepository.save(saga);
+        
+        logSagaEvent(saga.getSagaId(), "SAGA_FAILED", "Payment failed");
+        
         logger.info("Saga failed for order: {}", orderId);
     }
 }

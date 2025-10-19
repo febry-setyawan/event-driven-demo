@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class PaymentService {
@@ -131,15 +132,17 @@ public class PaymentService {
 
     private void publishPaymentFailedEvent(Long orderId) {
         try {
+            String idempotencyKey = UUID.randomUUID().toString();
             Map<String, Object> event = new HashMap<>();
             event.put("eventType", "PaymentFailed");
             event.put("orderId", orderId);
+            event.put("idempotencyKey", idempotencyKey);
             event.put("timestamp", Instant.now().toString());
 
             String eventJson = objectMapper.writeValueAsString(event);
             kafkaTemplate.send(PAYMENT_EVENTS_TOPIC, orderId.toString(), eventJson);
             
-            logger.info("Published PaymentFailed event for order: {}", orderId);
+            logger.info("Published PaymentFailed event for order: {} with idempotencyKey: {}", orderId, idempotencyKey);
         } catch (JsonProcessingException e) {
             logger.error("Error publishing payment failed event", e);
         }
@@ -147,16 +150,18 @@ public class PaymentService {
 
     private void publishPaymentCancelledEvent(Payment payment) {
         try {
+            String idempotencyKey = UUID.randomUUID().toString();
             Map<String, Object> event = new HashMap<>();
             event.put("eventType", "PaymentCancelled");
             event.put("paymentId", payment.getId());
             event.put("orderId", payment.getOrderId());
+            event.put("idempotencyKey", idempotencyKey);
             event.put("timestamp", Instant.now().toString());
 
             String eventJson = objectMapper.writeValueAsString(event);
             kafkaTemplate.send(PAYMENT_EVENTS_TOPIC, payment.getId().toString(), eventJson);
             
-            logger.info("Published PaymentCancelled event for payment: {}", payment.getId());
+            logger.info("Published PaymentCancelled event for payment: {} with idempotencyKey: {}", payment.getId(), idempotencyKey);
         } catch (JsonProcessingException e) {
             logger.error("Error publishing payment cancelled event", e);
         }
@@ -168,18 +173,20 @@ public class PaymentService {
         
         while (attempt < maxRetries) {
             try {
+                String idempotencyKey = UUID.randomUUID().toString();
                 Map<String, Object> event = new HashMap<>();
                 event.put("eventType", "PaymentProcessed");
                 event.put("paymentId", payment.getId());
                 event.put("orderId", payment.getOrderId());
                 event.put("amount", payment.getAmount());
                 event.put("status", payment.getStatus());
+                event.put("idempotencyKey", idempotencyKey);
                 event.put("timestamp", Instant.now().toString());
 
                 String eventJson = objectMapper.writeValueAsString(event);
                 
                 kafkaTemplate.send(PAYMENT_EVENTS_TOPIC, payment.getId().toString(), eventJson).get();
-                logger.info("Published PaymentProcessed event for payment: {} (attempt: {})", payment.getId(), attempt + 1);
+                logger.info("Published PaymentProcessed event for payment: {} with idempotencyKey: {} (attempt: {})", payment.getId(), idempotencyKey, attempt + 1);
                 return;
                 
             } catch (Exception e) {
