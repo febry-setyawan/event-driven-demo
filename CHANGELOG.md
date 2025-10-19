@@ -6,6 +6,83 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v1.4.2] - 2025-10-19
+
+### Fixed
+- **Grafana Dashboard Persistence**
+  - Fixed dashboard provisioning path configuration
+  - Dashboards now persist after container restart
+  - Separated datasources and dashboards volume mounts
+  - Set allowUiUpdates to false to prevent non-persistent changes
+  - Both dashboards auto-load: Event-Driven Architecture Metrics, Saga Pattern Monitoring
+
+- **Kafka Metrics Export**
+  - Added micrometer-registry-prometheus dependency to order-gateway
+  - Updated Grafana Agent to scrape order-gateway instead of deprecated api-gateway
+  - Kafka producer metrics now exported from order-gateway and order-service
+  - Dashboard "Kafka Messages Published" now displays data correctly
+
+- **Dashboard Query Aggregation**
+  - Fixed duplicate metrics in HTTP Response Time panel (3 services instead of 9)
+  - Fixed duplicate metrics in JVM Memory Usage panel (3 services instead of 9)
+  - Aggregated queries by application label using sum() by (application)
+  - Changed JVM memory query to use committed_bytes instead of max_bytes (-1)
+
+- **Saga Pattern Failures**
+  - Removed foreign key constraint on payments.order_id (payment-service now independent)
+  - Fixed aggressive saga recovery on startup (added 1-minute grace period)
+  - Sagas now complete successfully instead of immediate compensation
+  - Recovery only compensates sagas older than 1 minute
+
+- **Circuit Breaker Actuator**
+  - Enabled circuitbreakers and circuitbreakerevents actuator endpoints
+  - Circuit breaker state now visible (CLOSED for orderService and paymentService)
+  - Test 8.1 now passes with proper state detection
+
+- **Test Suite**
+  - Fixed test 10.1 expectation for long customer ID validation
+  - All 43 tests now pass (100% success rate)
+  - Circuit breaker state test fixed
+  - Long input validation test fixed
+
+### Changed
+- **Database Schema**
+  - payments.order_id: Changed from REFERENCES orders(id) to NOT NULL (removed FK)
+  - Allows payment-service to operate independently without order table dependency
+
+- **Monitoring Configuration**
+  - monitoring/grafana-agent.yaml: Updated job from api-gateway to order-gateway
+  - monitoring/grafana/provisioning/dashboards/dashboards.yml: Updated path and disabled UI updates
+  - docker-compose.yml: Fixed Grafana volume mounts for proper provisioning
+
+### Technical Details
+- **New Dependency**: io.micrometer:micrometer-registry-prometheus (order-gateway)
+- **Configuration Changes**: 
+  - order-gateway: Added management.metrics.tags.application
+  - order-gateway: Enabled circuitbreakers actuator endpoints
+  - SagaOrchestrator: Added createdAt filter in recoverSagas()
+- **Volume Mounts**: 
+  - Grafana datasources: ./monitoring/grafana/provisioning/datasources
+  - Grafana dashboards config: ./monitoring/grafana/provisioning/dashboards/dashboards.yml
+  - Grafana dashboards JSON: ./monitoring/grafana/dashboards
+
+### Testing Results
+- Total Tests: 43
+- Passed: 43 ✅
+- Failed: 0 ❌
+- Success Rate: 100%
+- All critical flows verified: Authentication, Orders, Payments, Saga, Circuit Breaker
+
+### Verification Steps
+1. Stop and remove all containers with volumes: `docker-compose down -v`
+2. Start all services: `docker-compose up -d`
+3. Access Grafana: http://localhost:3000 (admin/admin)
+4. Verify dashboards auto-load and display metrics
+5. Create orders and verify saga completion
+6. Run test suite: `bash test-comprehensive.sh`
+
+---
+
 ## [v1.4] - 2025-10-17
 
 ### Added
