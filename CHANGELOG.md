@@ -83,6 +83,36 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [v1.4.1] - 2025-10-19
+
+### Fixed
+- **Swagger UI POST /api/orders Endpoint**
+  - Fixed NullPointerException in SagaOrchestrator when orderId is null
+  - Implemented order-response Kafka topic for orderId communication
+  - Added correlationId-based request-response pattern between order-gateway and order-service
+  - Order-gateway now waits for orderId from order-service before returning response
+  - Fixed payment service URL paths in order-service configuration
+
+### Added
+- **New Kafka Topic**: order-response (1 partition) for order creation responses
+- **OrderValidationFilter**: Kafka consumer to receive orderId from order-service
+- **CorrelationId Pattern**: UUID-based correlation for async request-response
+
+### Changed
+- **Order Creation Flow**: 
+  - Order-gateway publishes OrderCreated event with correlationId
+  - Order-service persists order and publishes response with orderId to order-response topic
+  - Order-gateway consumes response and returns orderId to client
+  - Synchronous API behavior with async messaging underneath
+
+### Technical Details
+- **New Topic**: order-response with 1 partition, 1 hour retention
+- **Timeout**: 5-second wait for order-service response
+- **Fallback**: Returns orderId=null if timeout occurs
+- **Configuration**: PAYMENT_SERVICE_URL environment variable for order-service
+
+---
+
 ## [v1.4] - 2025-10-17
 
 ### Added
