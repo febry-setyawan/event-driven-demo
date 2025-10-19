@@ -17,6 +17,17 @@ kafka-topics --create \
 
 echo "✓ Created order-events topic"
 
+# Create order-response topic
+kafka-topics --create \
+  --bootstrap-server localhost:9092 \
+  --topic order-response \
+  --partitions 1 \
+  --replication-factor 1 \
+  --if-not-exists \
+  --config retention.ms=3600000
+
+echo "✓ Created order-response topic"
+
 # Create payment-events topic
 kafka-topics --create \
   --bootstrap-server localhost:9092 \

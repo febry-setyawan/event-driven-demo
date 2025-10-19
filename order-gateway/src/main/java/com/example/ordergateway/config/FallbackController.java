@@ -25,8 +25,8 @@ public class FallbackController {
             .body(Map.of("error", "Order service is currently unavailable. Please try again later.")));
     }
 
-    @GetMapping("/payments")
-    @PostMapping("/payments")
+    @GetMapping("/fallback/payments")
+    @PostMapping("/fallback/payments")
     public Mono<ResponseEntity<Map<String, String>>> paymentFallback() {
         return Mono.just(ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
             .body(Map.of("error", "Payment service is currently unavailable. Please try again later.")));

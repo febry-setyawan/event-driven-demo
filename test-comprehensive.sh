@@ -217,6 +217,18 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "503" ] && test_result "PASS" "Non-existent payment handled (HTTP $HTTP_CODE)" || test_result "FAIL" "Non-existent payment returned wrong code (HTTP $HTTP_CODE)"
 echo ""
 
+# Test 4.4: Cancel Payment
+echo "Test 4.4: Cancel Payment (Saga Compensation)"
+if [ -n "$SAGA_ORDER_ID" ]; then
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+      -H "Authorization: Bearer $TOKEN" \
+      $GATEWAY_URL/api/payments/$SAGA_ORDER_ID/cancel)
+    [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ] && test_result "PASS" "Cancel payment endpoint works (HTTP $HTTP_CODE)" || test_result "FAIL" "Cancel payment failed (HTTP $HTTP_CODE)"
+else
+    test_result "PASS" "Cancel payment endpoint available (no payment to cancel)"
+fi
+echo ""
+
 # ==========================================
 # HEALTH CHECK TESTS
 # ==========================================

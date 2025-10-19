@@ -51,6 +51,9 @@ services:
         kafka-topics --create --bootstrap-server kafka:29092 --topic order-events --partitions 3 --replication-factor 1 --if-not-exists --config retention.ms=604800000
         echo "✓ Created order-events topic"
         
+        kafka-topics --create --bootstrap-server kafka:29092 --topic order-response --partitions 1 --replication-factor 1 --if-not-exists --config retention.ms=3600000
+        echo "✓ Created order-response topic"
+        
         kafka-topics --create --bootstrap-server kafka:29092 --topic payment-events --partitions 3 --replication-factor 1 --if-not-exists --config retention.ms=604800000
         echo "✓ Created payment-events topic"
         
@@ -320,6 +323,27 @@ services:
     command: -config.file=/etc/promtail/config.yml
     depends_on:
       - loki
+
+  # Nginx reverse proxy for Swagger UI
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      order-gateway:
+        condition: service_healthy
+      swagger-ui:
+        condition: service_started
+
+  # Swagger UI
+  swagger-ui:
+    image: swaggerapi/swagger-ui:latest
+    container_name: swagger-ui
+    environment:
+      SWAGGER_JSON_URL: /v3/api-docs/aggregated
 
 volumes:
   kafka-data:
