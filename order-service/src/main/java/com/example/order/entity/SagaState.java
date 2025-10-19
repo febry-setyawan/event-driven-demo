@@ -11,6 +11,9 @@ public class SagaState {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
+    @Column(name = "saga_id", nullable = false, unique = true, length = 36)
+    private String sagaId;
+    
     @Column(name = "order_id", nullable = false, unique = true)
     private Long orderId;
     
@@ -37,8 +40,9 @@ public class SagaState {
         this.updatedAt = LocalDateTime.now();
     }
 
-    public SagaState(Long orderId, String status, String currentStep) {
+    public SagaState(String sagaId, Long orderId, String status, String currentStep) {
         this();
+        this.sagaId = sagaId;
         this.orderId = orderId;
         this.status = status;
         this.currentStep = currentStep;
@@ -47,6 +51,9 @@ public class SagaState {
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+
+    public String getSagaId() { return sagaId; }
+    public void setSagaId(String sagaId) { this.sagaId = sagaId; }
 
     public Long getOrderId() { return orderId; }
     public void setOrderId(Long orderId) { this.orderId = orderId; }

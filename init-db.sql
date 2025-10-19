@@ -34,6 +34,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_order_id_unique ON payments(order
 -- Create saga_state table for distributed transaction management
 CREATE TABLE IF NOT EXISTS saga_state (
     id BIGSERIAL PRIMARY KEY,
+    saga_id VARCHAR(36) NOT NULL UNIQUE,
     order_id BIGINT NOT NULL UNIQUE,
     status VARCHAR(50) NOT NULL,
     current_step VARCHAR(50),
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS saga_state (
 );
 
 -- Create indexes for saga_state
+CREATE INDEX IF NOT EXISTS idx_saga_state_saga_id ON saga_state(saga_id);
 CREATE INDEX IF NOT EXISTS idx_saga_state_order_id ON saga_state(order_id);
 CREATE INDEX IF NOT EXISTS idx_saga_state_status ON saga_state(status);
 
@@ -59,7 +61,7 @@ INSERT INTO payments (order_id, amount, status) VALUES
 (3, 299.97, 'COMPLETED')
 ON CONFLICT DO NOTHING;
 
-INSERT INTO saga_state (order_id, status, current_step, payment_id) VALUES
-(1, 'COMPLETED', 'PAYMENT_COMPLETED', 1),
-(3, 'COMPLETED', 'PAYMENT_COMPLETED', 2)
+INSERT INTO saga_state (saga_id, order_id, status, current_step, payment_id) VALUES
+('00000000-0000-0000-0000-000000000001', 1, 'COMPLETED', 'PAYMENT_COMPLETED', 1),
+('00000000-0000-0000-0000-000000000003', 3, 'COMPLETED', 'PAYMENT_COMPLETED', 2)
 ON CONFLICT DO NOTHING;

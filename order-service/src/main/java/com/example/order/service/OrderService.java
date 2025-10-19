@@ -128,25 +128,27 @@ public class OrderService {
         Integer quantity = event.get("quantity").asInt();
         BigDecimal amount = new BigDecimal(event.get("amount").asText());
         String correlationId = event.has("correlationId") ? event.get("correlationId").asText() : null;
+        String sagaId = event.has("sagaId") ? event.get("sagaId").asText() : java.util.UUID.randomUUID().toString();
 
         Order order = new Order(customerId, productId, quantity, amount, "WAITING");
         order = orderRepository.save(order);
         Long orderId = order.getId();
 
-        logger.info("Order created with ID: {} with status WAITING", orderId);
+        logger.info("Order created with ID: {} with status WAITING, sagaId: {}", orderId, sagaId);
+
+        sagaOrchestrator.startSagaWithId(sagaId, orderId, customerId, productId, quantity, amount);
 
         if (correlationId != null) {
-            publishOrderCreatedResponse(orderId, correlationId);
+            publishOrderCreatedResponse(orderId, correlationId, sagaId);
         }
-
-        sagaOrchestrator.startSaga(orderId, customerId, productId, quantity, amount);
     }
 
-    private void publishOrderCreatedResponse(Long orderId, String correlationId) {
+    private void publishOrderCreatedResponse(Long orderId, String correlationId, String sagaId) {
         try {
             Map<String, Object> response = new HashMap<>();
             response.put("orderId", orderId);
             response.put("correlationId", correlationId);
+            response.put("sagaId", sagaId);
             response.put("status", "PENDING");
 
             String responseJson = objectMapper.writeValueAsString(response);

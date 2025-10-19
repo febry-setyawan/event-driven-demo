@@ -23,6 +23,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class SagaOrchestrator {
@@ -44,12 +45,18 @@ public class SagaOrchestrator {
 
     private final WebClient webClient = WebClient.builder().build();
 
-    public void startSaga(Long orderId, String customerId, String productId, Integer quantity, BigDecimal amount) {
-        logger.info("Starting saga for order: {}", orderId);
+    public String startSaga(Long orderId, String customerId, String productId, Integer quantity, BigDecimal amount) {
+        String sagaId = UUID.randomUUID().toString();
+        return startSagaWithId(sagaId, orderId, customerId, productId, quantity, amount);
+    }
 
-        SagaState saga = new SagaState(orderId, "WAITING", "ORDER_CREATED");
+    public String startSagaWithId(String sagaId, Long orderId, String customerId, String productId, Integer quantity, BigDecimal amount) {
+        logger.info("Starting saga {} for order: {}", sagaId, orderId);
+
+        SagaState saga = new SagaState(sagaId, orderId, "WAITING", "ORDER_CREATED");
         saga = sagaStateRepository.save(saga);
-        logger.info("Saga state saved for order: {} with status WAITING", orderId);
+        logger.info("Saga {} state saved for order: {} with status WAITING", sagaId, orderId);
+        return sagaId;
     }
 
     public void processPayment(Long orderId, Long paymentId) {
@@ -115,15 +122,17 @@ public class SagaOrchestrator {
 
     private void publishCompensationEvent(String eventType, Long entityId) {
         try {
+            String idempotencyKey = UUID.randomUUID().toString();
             Map<String, Object> event = new HashMap<>();
             event.put("eventType", eventType);
             event.put("entityId", entityId);
+            event.put("idempotencyKey", idempotencyKey);
             event.put("timestamp", Instant.now().toString());
 
             String eventJson = objectMapper.writeValueAsString(event);
             kafkaTemplate.send(COMPENSATION_TOPIC, entityId.toString(), eventJson);
 
-            logger.info("Published {} event for entity: {}", eventType, entityId);
+            logger.info("Published {} event for entity: {} with idempotencyKey: {}", eventType, entityId, idempotencyKey);
 
         } catch (JsonProcessingException e) {
             logger.error("Error publishing compensation event", e);
