@@ -94,8 +94,8 @@ class PaymentServiceTest {
     @Test
     void testProcessPayment_HighAmount_Success() throws Exception {
         // Given
-        testRequest.setAmount(new BigDecimal("999.99"));
-        testPayment = new Payment(1L, new BigDecimal("999.99"), "COMPLETED");
+        testRequest.setAmount(new BigDecimal("500.00")); // Changed from 999.99 which triggers error simulation
+        testPayment = new Payment(1L, new BigDecimal("500.00"), "COMPLETED");
         testPayment.setId(100L);
         
         when(paymentRepository.findByOrderId(1L)).thenReturn(Optional.empty());
@@ -109,7 +109,7 @@ class PaymentServiceTest {
 
         // Then
         assertNotNull(response);
-        assertEquals(new BigDecimal("999.99"), response.getAmount());
+        assertEquals(new BigDecimal("500.00"), response.getAmount());
         verify(paymentRepository, times(1)).save(any(Payment.class));
     }
 

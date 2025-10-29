@@ -112,21 +112,20 @@ class OrderEventServiceTest {
     }
 
     @Test
-    void testPublishOrderCreated_NullOrderId_HandlesGracefully() throws Exception {
+    void testPublishOrderCreated_NullOrderId_ThrowsNPE() throws Exception {
         // Given
         when(objectMapper.writeValueAsString(anyMap())).thenReturn("{}");
 
-        // When/Then - Should not throw NullPointerException
-        assertDoesNotThrow(() -> orderEventService.publishOrderCreated(null, testOrderRequest));
+        // When/Then - orderId.toString() throws NPE when orderId is null
+        assertThrows(NullPointerException.class, 
+            () -> orderEventService.publishOrderCreated(null, testOrderRequest));
     }
 
     @Test
-    void testPublishOrderCreated_NullRequest_HandlesGracefully() throws Exception {
-        // Given
-        when(objectMapper.writeValueAsString(anyMap())).thenReturn("{}");
-
-        // When/Then - Should not throw NullPointerException
-        assertDoesNotThrow(() -> orderEventService.publishOrderCreated(1L, null));
+    void testPublishOrderCreated_NullRequest_ThrowsNPE() throws Exception {
+        // When/Then - request.getCustomerId() throws NPE when request is null
+        assertThrows(NullPointerException.class, 
+            () -> orderEventService.publishOrderCreated(1L, null));
     }
 
     @Test

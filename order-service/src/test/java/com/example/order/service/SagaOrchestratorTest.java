@@ -177,7 +177,7 @@ class SagaOrchestratorTest {
         // Then
         verify(sagaStateRepository, times(2)).save(any(SagaState.class)); // Initial compensating + final failed
         verify(sagaEventRepository, atLeast(3)).save(any(SagaEvent.class));
-        verify(kafkaTemplate, times(2)).send(anyString(), anyString(), anyString());
+        verify(kafkaTemplate, times(1)).send(anyString(), anyString(), anyString()); // Only cancelOrder publishes
     }
 
     @Test

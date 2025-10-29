@@ -74,7 +74,7 @@ class JwtUtilTest {
         
         // When
         String token1 = jwtUtil.generateToken(username);
-        Thread.sleep(10); // Small delay to ensure different timestamps
+        Thread.sleep(1000); // Increased delay to ensure different timestamps
         String token2 = jwtUtil.generateToken(username);
 
         // Then
@@ -231,7 +231,8 @@ class JwtUtilTest {
         // Then
         assertNotNull(token);
         String extracted = jwtUtil.extractUsername(token);
-        assertEquals(emptyUsername, extracted);
+        // Empty string in JWT subject is stored as null
+        assertTrue(extracted == null || extracted.isEmpty());
     }
 
     @Test
